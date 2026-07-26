@@ -1,0 +1,9 @@
+# PolyScribe — dependency runtime (Milestone 1), versi TERKUNCI setelah instalasi
+# pertama yang berhasil di mesin ini (Python 3.11.9). Daftar lengkap termasuk
+# transitive ada di requirements.lock.txt (hasil `pip freeze`).
+faster-whisper==1.2.1
+sherpa-onnx==1.13.4
+soundfile==0.14.0
+numpy==2.0.2
+imageio-ffmpeg==0.6.0
+huggingface-hub==1.22.0

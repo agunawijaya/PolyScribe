@@ -1,0 +1,22 @@
+# Model & binary besar — offline, tidak di-commit (lihat scripts/download_models.py)
+models/
+vendor/
+
+# venv & cache
+.venv/
+__pycache__/
+*.pyc
+
+# output percobaan
+tests/sample/*.wav
+tests/sample/*.txt
+
+# === PRIVASI: rekaman & transkrip rapat asli JANGAN masuk git ===
+# (ditambah PM sebagai pengaman sebelum push pertama; Architect finalkan set persisnya)
+*.mp3
+*.wav
+*.m4a
+tests/fixtures/
+
+# Dokumen kerja internal antar-agen — tidak dipublikasikan ke repo.
+prompts/
