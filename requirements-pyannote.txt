@@ -1,0 +1,31 @@
+# Dependency PLAN B diarization (pyannote.audio) — brief 36.
+#
+# TERPISAH dari requirements.txt dengan sengaja: ini BESAR (PyTorch ~2GB) dan hanya
+# dipakai bila diarizer_choice="pyannote". Plan A (sherpa-onnx) tak butuh apa pun di
+# sini. Pasang hanya di profil build yang memakai pyannote:
+#
+#     & $py -m pip install -r requirements-pyannote.txt
+#
+# Lalu unduh model ter-gate SEKALI (butuh HF token + lisensi 3 repo diterima):
+#     & $py scripts\download_models.py --only pyannote --hf-token <TOKEN>
+#
+# Runtime tetap OFFLINE tanpa token (HF_HUB_OFFLINE dipaksa oleh pyannote_backend).
+# Kunci versi lewat `pip freeze` setelah build pertama yang berhasil (pola proyek).
+# CATATAN (brief 36): butuh pyannote.audio 4.x (torchaudio baru membuang API yang
+# dipakai 3.x). Model pasangannya = pyannote/speaker-diarization-community-1 (bukan
+# 3.1 lama). download_models.py --only pyannote sudah menyesuaikan.
+pyannote.audio>=4
+# torch/torchaudio ditarik otomatis oleh pyannote.audio. Di laptop NVIDIA, boleh
+# ganti ke wheel CUDA (index-url resmi PyTorch) untuk diarization ber-CUDA; di AMD
+# biarkan CPU (ASR sudah di Vulkan, diarization bukan bottleneck).
+#
+# CATATAN k2 / speechbrain (P0 brief 43): pyannote.audio 4.x menarik speechbrain,
+# dan speechbrain 1.1 me-lazy-import `speechbrain.integrations.k2_fsa` saat pipeline
+# dimuat. Kalau paket `k2` tak ada, import itu meledak & MENGGAGALKAN runtime pyannote
+# walau `import pyannote` sendiri sukses. k2 = library FST berat (butuh build khusus)
+# yang TIDAK dipakai jalur diarization kita sama sekali.
+#   Keputusan: JANGAN memasang k2 dan JANGAN pin speechbrain ke versi lama. Sebagai
+#   gantinya pyannote_backend.load() mendaftarkan modul `k2` KOSONG (stub) di
+#   sys.modules sebelum memuat pyannote — lazy-import jadi no-op. Lebih murah &
+#   lebih stabil lintas-versi daripada mengejar pin speechbrain, dan tak menyeret
+#   dependency native raksasa. Lihat pyannote_backend.py untuk detail.
