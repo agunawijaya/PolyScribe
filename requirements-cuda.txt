@@ -1,0 +1,37 @@
+# Dependency EXTRAS untuk mesin ber-GPU NVIDIA — brief NVIDIA_00/01 bootstrap.
+#
+# TERPISAH dari requirements.txt supaya laptop AMD tak ikut menarik ~4 GB DLL
+# CUDA + wheel torch CUDA yang tak akan pernah dipakai di sana (jalur AMD =
+# Vulkan/CPU). Pasang HANYA di mesin ber-GPU NVIDIA. URUTAN PENTING:
+#
+#     & $py -m pip install -r requirements.txt            # jalur inti (30 paket)
+#     & $py -m pip install -r requirements-cuda.txt       # <-- SEBELUM pyannote
+#     & $py -m pip install -r requirements-pyannote.txt   # OPSIONAL, mode Akurat
+#
+# KENAPA URUTAN: pyannote.audio 4.x menarik torch>=2.13 sebagai transitive. Kalau
+# dijalankan tanpa torch CUDA sudah terpasang lebih dulu, pip akan mengunduh
+# torch varian CPU dari PyPI default (~600 MB terbuang & CUDA hilang). Trap
+# ini sudah dialami sekali di NVIDIA_01 — jangan diulang.
+#
+# --- KENAPA nvidia-cublas-cu12 & nvidia-cudnn-cu12 ---
+# Sejak ctranslate2 4.5, cuBLAS & cuDNN TIDAK dibundel lagi. Kalau tak ada di
+# sistem, faster-whisper CUDA crash saat encode() dengan
+# "cublas64_12.dll is not found". Paket pip di bawah menyediakan DLL itu di
+# site-packages; bootstrap di polyscribe/__init__.py yang membuatnya reachable
+# lewat PATH saat runtime (Windows LoadLibraryW tak melihat
+# os.add_dll_directory).
+#
+# --- KENAPA torch/torchaudio +cu126 di sini ---
+# Supaya pyannote.audio 4.x (mode Akurat) berjalan di CUDA, BUKAN CPU. Versi
+# 2.13.0+cu126 dipilih karena: (a) itu versi tertinggi torch yang punya wheel
+# CUDA saat brief ini ditulis, (b) index cu124 tertinggi hanya 2.6.0 (terlalu
+# tua untuk pyannote 4.x), (c) driver NVIDIA 591.74 mendukung CUDA 12.6 tanpa
+# masalah. Kalau di masa depan pyannote menuntut torch lebih baru, cek dulu
+# index mana yang punya wheel-nya (`pip index versions torch --index-url ...`).
+
+--extra-index-url https://download.pytorch.org/whl/cu126
+
+torch==2.13.0+cu126
+torchaudio==2.11.0+cu126
+nvidia-cublas-cu12
+nvidia-cudnn-cu12

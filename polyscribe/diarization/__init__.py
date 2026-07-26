@@ -23,8 +23,15 @@ def pyannote_availability(config) -> tuple[bool, str]:
       2. model community-1 terbundel (config.yaml ada di models/diarization/pyannote/).
     Kalau salah satu gagal, `select_diarizer` jatuh ke sherpa & UI memakai `alasan`
     ini sebagai pesan. Saat siap, alasan = "" (string kosong)."""
+    # find_spec pada modul TOP-LEVEL yang tak ada -> None (aman). Tapi pada
+    # sub-modul spt "pyannote.audio", ia mengimpor parent DULU untuk mencari
+    # anaknya — kalau parent-nya tak ada, malah ModuleNotFoundError. Tangkap
+    # supaya fallback bekerja seperti didokumentasikan di atas.
     have_torch = importlib.util.find_spec("torch") is not None
-    have_pyannote = importlib.util.find_spec("pyannote.audio") is not None
+    try:
+        have_pyannote = importlib.util.find_spec("pyannote.audio") is not None
+    except ModuleNotFoundError:
+        have_pyannote = False
     if not (have_torch and have_pyannote):
         return False, ("Mode Akurat butuh PyTorch + pyannote.audio (dependency plan B, "
                        "~GB). Pasang: pip install -r requirements-pyannote.txt")

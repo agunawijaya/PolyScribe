@@ -7,19 +7,18 @@ REM ============================================================
 
 title PolyScribe
 
-REM Pindah ke folder proyek (/d supaya pindah drive pun aman),
-REM jadi file ini tetap jalan walau diklik dari Desktop atau mana saja.
-cd /d "C:\Project\PolyScribe"
+REM Pindah ke folder skrip ini sendiri (/d supaya pindah drive pun aman).
+REM %~dp0 = drive+dir file .bat -> apa pun lokasi repo, launcher ini ikut.
+cd /d "%~dp0"
 
 REM Cek dulu Python di venv. Ini titik yang paling sering putus
-REM kalau folder proyek dipindah atau venv terhapus.
+REM kalau venv terhapus atau proyek belum di-setup.
 if not exist ".venv\Scripts\python.exe" (
     echo.
     echo   Tidak menemukan Python di:
     echo     %CD%\.venv\Scripts\python.exe
     echo.
-    echo   Pastikan folder proyek masih di C:\Project\PolyScribe
-    echo   dan folder .venv belum terhapus.
+    echo   Setup venv dulu di folder proyek ini, lalu coba lagi.
     echo.
     pause
     exit /b 1

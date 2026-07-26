@@ -117,10 +117,12 @@ def test_collapse_token_repeats_preserves_first_instance_timestamps():
 
 
 def _load_real_transcript():
-    # Transkrip Std-11 5-menit asli (q5_0) bila ada di scratchpad — uji nyata.
-    p = (r"C:\Users\aguna\AppData\Local\Temp\claude\C--Project-PolyScribe"
-         r"\2bb02e6c-8801-4e60-a5cb-3fc859ca1556\scratchpad\q_bench\transcript_q5_0.txt")
-    if os.path.exists(p):
+    # Uji nyata di transkrip Std-11 asli (q5_0). Path-nya spesifik per-mesin
+    # (dulu scratchpad Claude di laptop AMD), jadi kita baca dari env var supaya
+    # tak ada path absolut yang lekat ke satu mesin. Kalau tak di-set / file
+    # absen, test lewat diam-diam (jaring pengaman, bukan gerbang keras).
+    p = os.environ.get("POLYSCRIBE_STD11_TRANSCRIPT", "")
+    if p and os.path.exists(p):
         return [ln for ln in open(p, encoding="utf-8").read().splitlines() if ln.strip()]
     return None
 

@@ -106,9 +106,10 @@ menyuapkan audio in-memory (`{"waveform","sample_rate"}`), bukan path.
 
 ## Perintah build / run / test
 Semua perintah di bawah SUDAH dijalankan sendiri (kebijakan: hanya perintah terbukti
-yang masuk sini). Semua pakai Python 3.11 di .venv.
+yang masuk sini). Semua pakai Python 3.11 di .venv. Jalankan dari root repo:
 
-    $py = "C:\Project\PolyScribe\.venv\Scripts\python.exe"
+    cd <path\ke\PolyScribe>          # apa pun path yang kamu clone
+    $py = ".\.venv\Scripts\python.exe"
 
 Unduh model (faster-whisper + diarization sherpa + GGML untuk Vulkan):
     & $py scripts\download_models.py
@@ -142,12 +143,15 @@ Hitung cepat jumlah speaker file penuh (diarization-saja, tahan interupsi):
 Buat klip uji (sekali; TERMASUK klip Arab — uji rutin dilarang hanya-Inggris):
     & $py prompts\scripts\make_fixtures.py
 
-Setup awal (sekali, dari nol) — Python 3.11, BUKAN 3.13 Store:
+Setup awal (sekali, dari nol) — Python 3.11, BUKAN 3.13 Store. Jalankan dari root repo:
     winget install --id Python.Python.3.11 --source winget --silent
-    & "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe" -m venv C:\Project\PolyScribe\.venv
+    & "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe" -m venv .venv
     & $py -m pip install --upgrade pip
     & $py -m pip install -r requirements.txt
     & $py -m pip freeze > requirements.lock.txt          # kunci versi
+
+Setup tambahan untuk mesin ber-GPU NVIDIA (brief NVIDIA_00/01/02):
+    & $py -m pip install -r requirements-cuda.txt        # SEBELUM pyannote — lihat header file itu
 
 Reproduksi di mesin lain (pakai versi terkunci):
     & $py -m pip install -r requirements.lock.txt

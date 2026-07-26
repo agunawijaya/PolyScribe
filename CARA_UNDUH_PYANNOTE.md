@@ -52,16 +52,18 @@ terminal kamu sendiri (Langkah 4).
 Buka PowerShell, lalu jalankan berikut satu per satu.
 
 ### 4a. Pasang PyTorch + pyannote (~2 GB, sekali saja)
+Masuk dulu ke folder repo PolyScribe (apa pun path-nya di mesinmu), lalu:
 ```powershell
-$py = "C:\Project\PolyScribe\.venv\Scripts\python.exe"
-& $py -m pip install -r C:\Project\PolyScribe\requirements-pyannote.txt
+cd <path\ke\PolyScribe>
+$py = ".\.venv\Scripts\python.exe"
+& $py -m pip install -r requirements-pyannote.txt
 ```
 Tunggu sampai selesai (bisa beberapa menit).
 
 ### 4b. Unduh model pyannote
-Ganti `hf_xxxxx` dengan token dari Langkah 3:
+Ganti `hf_xxxxx` dengan token dari Langkah 3 (tetap di folder repo dari 4a):
 ```powershell
-& $py C:\Project\PolyScribe\scripts\download_models.py --only pyannote --hf-token hf_xxxxx
+& $py scripts\download_models.py --only pyannote --hf-token hf_xxxxx
 ```
 
 ---

@@ -75,7 +75,9 @@ dideteksi otomatis (tidak ada input manual).
    "selesai" palsu. User menghargai kejujuran di atas kesan bagus.
 
 ## Git & privasi (jangan lengah)
-- Kode datang lewat git dari laptop AMD. Repo di C:\Project\PolyScribe.
+- Kode datang lewat git dari laptop AMD. Repo di-clone ke lokasi kerja pilihanmu
+  (mis. C:\Project\PolyScribe di laptop AMD, E:\Projects\PolyScribe di laptop
+  NVIDIA). Perintah di CLAUDE.md ditulis relatif — jalankan dari root repo.
 - Model TIDAK di git — disediakan terpisah di tiap mesin.
 - RAHASIA: rekaman & transkrip rapat asli TIDAK BOLEH masuk git. Ada .gitignore,
   tapi SELALU `git status` sebelum commit — kalau ada .mp3 atau transkrip rapat di
