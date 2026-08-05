@@ -30,6 +30,41 @@ from ..progress import ProgressEvent
 PYANNOTE_REPO = "pyannote/speaker-diarization-community-1"
 
 
+def _pick_pyannote_device(config, torch_mod):
+    """Pilih device pyannote — CPU-aman default di GPU sempit.
+
+    AKAR (bug user 2026-08): laptop NVIDIA RTX 4060 8 GB memberi CUDA OOM saat file
+    1 jam. faster-whisper large-v3 float16 sudah duduk di GPU (~3,2 GB); sisa ~4 GB
+    tak cukup untuk pyannote community-1 memuat model + memproses aktivasi file
+    panjang. Kode lama tanpa syarat memilih CUDA bila tersedia -> selalu OOM di
+    laptop dgn VRAM sedang. Sekarang tiga mode:
+      - "cpu": paksa CPU. Aman, ~2,5x lebih lambat. Rekomendasi default kalau ragu.
+      - "cuda": paksa CUDA. Dipakai bila GPU besar (>= ~12 GB) atau ASR di CPU/Vulkan.
+      - "auto" (default): CUDA hanya bila torch.cuda.mem_get_info() melaporkan free
+        >= config.pyannote_min_free_vram_gb (default 4 GB); kalau tidak, CPU. Cek
+        DILAKUKAN SAAT LOAD (sebelum ASR CUDA menyedot VRAM), jadi ambang ini harus
+        sudah memperhitungkan bahwa ASR akan menyita ~3,2 GB.
+    Diarize() punya lapis kedua: try/except CUDA OOM -> retry CPU (jaring pengaman
+    kalau estimasi VRAM meleset).
+    """
+    choice = str(getattr(config, "pyannote_device", "auto")).lower()
+    if choice == "cpu":
+        return torch_mod.device("cpu")
+    if not torch_mod.cuda.is_available():
+        return torch_mod.device("cpu")     # tak ada CUDA -> apa pun choice, CPU
+    if choice == "cuda":
+        return torch_mod.device("cuda")
+
+    # "auto" — cek free VRAM. mem_get_info kembalikan (free, total) dalam bytes.
+    try:
+        free_bytes, _total = torch_mod.cuda.mem_get_info()
+    except Exception:
+        return torch_mod.device("cpu")     # gagal cek -> aman: CPU
+    free_gb = free_bytes / (1024 ** 3)
+    threshold = float(getattr(config, "pyannote_min_free_vram_gb", 4.0))
+    return torch_mod.device("cuda" if free_gb >= threshold else "cpu")
+
+
 def _turns_from_annotation(annotation) -> list[SpeakerTurn]:
     """Ubah pyannote Annotation -> daftar SpeakerTurn terurut, label distabilkan
     kontigu (SPEAKER_00, 01, ... sesuai urutan kemunculan).
@@ -190,10 +225,9 @@ class PyannoteDiarizer(Diarizer):
                 f"file model tak lengkap / lisensi belum diterima saat build. Cek {pdir}."
             )
 
-        # Deteksi device RUNTIME (bukan hard-code vendor): CUDA di laptop NVIDIA,
-        # CPU di AMD (pyannote tak pakai Vulkan). ASR sudah di Vulkan, jadi CPU di
-        # sini bukan bottleneck.
-        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Pilih device via heuristik (bug user 2026-08 CUDA OOM di RTX 4060 8 GB):
+        # "auto" -> CUDA hanya bila free VRAM cukup sesudah ASR; "cpu"/"cuda" = paksa.
+        self._device = _pick_pyannote_device(self.config, torch)
         pipeline.to(self._device)
         self._pipeline = pipeline
 
@@ -224,12 +258,29 @@ class PyannoteDiarizer(Diarizer):
         # Jumlah pembicara SELALU auto — TAK meneruskan num_speakers apa pun.
         from pyannote.audio.pipelines.utils.hook import ProgressHook
 
+        def _run_pipeline(input_dict):
+            try:
+                with ProgressHook() as _hook:
+                    return self._pipeline(input_dict, hook=_hook)
+            except TypeError:
+                # Versi pyannote yang API hook-nya beda -> jalan tanpa hook.
+                return self._pipeline(input_dict)
+
         try:
-            with ProgressHook() as _hook:
-                output = self._pipeline(audio_in, hook=_hook)
-        except TypeError:
-            # Versi pyannote yang API hook-nya beda -> jalan tanpa hook.
-            output = self._pipeline(audio_in)
+            output = _run_pipeline(audio_in)
+        except torch.cuda.OutOfMemoryError as oom:
+            # Jaring pengaman: preflight VRAM meleset (mis. proses lain merebut GPU
+            # setelah load). Pindah pipeline & waveform ke CPU, kosongkan cache,
+            # retry SEKALI. Kalau retry masih gagal -> biar error naik ke user.
+            progress.emit(ProgressEvent(
+                stage="diarize", fraction=0.0,
+                message=f"VRAM habis ({oom.__class__.__name__}), pindah ke CPU & retry",
+                text_snippet="pyannote: CUDA OOM -> retry di CPU"))
+            self._pipeline.to(torch.device("cpu"))
+            self._device = torch.device("cpu")
+            torch.cuda.empty_cache()
+            audio_in = {"waveform": waveform.to("cpu"), "sample_rate": int(sr)}
+            output = _run_pipeline(audio_in)
 
         # pyannote 4.x mengembalikan DiarizeOutput (bukan Annotation langsung).
         # Pakai `speaker_diarization` = versi OVERLAP-AWARE (dua orang bisa bicara

@@ -163,10 +163,21 @@ class StreamingMerger:
     """
 
     def __init__(self, turns: list[SpeakerTurn], island_max_s: float = 4.0,
-                 sentence_gap_s: float = 1.2, lookahead: int = 2):
+                 sentence_gap_s: float = 1.2, lookahead: int = 2,
+                 sentence_max_s: float = 15.0):
         self.turns = turns
         self.island_max_s = island_max_s   # durasi maks sebuah "island"
         self.sentence_gap_s = sentence_gap_s  # jeda yang memaksa batas kalimat
+        # Cap durasi "kalimat" tanpa punctuation. Akar (bug user 2026-08):
+        # Whisper pada audio ber-overlap tinggi kadang tidak beri . ! ? selama
+        # 30-60 detik -> semua word menumpuk di satu "kalimat" -> _dominant_speaker
+        # menugaskan seluruh blob ke SATU speaker (yg overlap terbesar) -> paragraf
+        # raksasa dgn atribusi salah. Cap ini = pengaman: kalau accumulated span
+        # > sentence_max_s tanpa hit . ! ? / big-gap, force break di titik dimana
+        # speaker per-word berubah. Kalau tak ada perubahan speaker (memang satu
+        # orang bicara panjang tanpa titik), tetap lanjut — kita hanya cegah
+        # atribusi silang, bukan pecah orang yang sama.
+        self.sentence_max_s = sentence_max_s
         self.lookahead = lookahead         # blok ditahan utk deteksi island
         self.prev_speaker = None
         self._wordbuf = []   # (start,end,text) menunggu kalimat tuntas
@@ -176,14 +187,38 @@ class StreamingMerger:
         """Potong _wordbuf jadi kalimat; kalimat tuntas -> block."""
         sentences = []
         cur = []
+        cur_start = None            # awal 'cur' (untuk cap durasi)
+        cur_last_speaker = None     # speaker word terakhir di 'cur'
         buf = self._wordbuf
         for i, (s, e, txt) in enumerate(buf):
             cur.append((s, e, txt))
+            if cur_start is None:
+                cur_start = s
             ends = bool(_SENT_END.search(txt.strip()))
             big_gap = (i + 1 < len(buf)) and (buf[i + 1][0] - e > self.sentence_gap_s)
-            if ends or big_gap:
+
+            # Cap: kalau accumulated 'cur' sudah panjang tanpa titik, cek apakah
+            # word BERIKUTNYA milik speaker berbeda (lookup word-level via
+            # _speaker_for_interval). Kalau ya, force break di sini -> cegah blob
+            # panjang yg menelan interjeksi orang lain.
+            force_break_at_speaker_change = False
+            if (not ends and not big_gap and cur_start is not None
+                    and (e - cur_start) > self.sentence_max_s
+                    and i + 1 < len(buf)):
+                # Speaker word saat ini
+                sp_here = _speaker_for_interval(s, e, self.turns, cur_last_speaker)
+                cur_last_speaker = sp_here
+                # Speaker word berikutnya
+                ns, ne, _ = buf[i + 1]
+                sp_next = _speaker_for_interval(ns, ne, self.turns, sp_here)
+                if sp_next != sp_here:
+                    force_break_at_speaker_change = True
+
+            if ends or big_gap or force_break_at_speaker_change:
                 sentences.append(cur)
                 cur = []
+                cur_start = None
+                cur_last_speaker = None
         # 'cur' = kalimat belum tuntas; tahan (kecuali finish).
         if force and cur:
             sentences.append(cur)

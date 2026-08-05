@@ -25,6 +25,14 @@ class FasterWhisperBackend(AsrBackend):
         # "en" -> kunci ke English (stabil di awal file); "auto" -> deteksi penuh.
         self.primary_language = primary_language
         self._model = None
+        # Cache untuk refine_segments() — dipakai pipeline._remerge_wordlevel
+        # SETELAH stream selesai NORMAL. Sebelum brief ini, faster-whisper TAK
+        # punya method ini (cuma whispercpp yg punya) — akibatnya jalur presisi
+        # word-level tak pernah dipakai di NVIDIA, atribusi speaker jatuh ke
+        # streaming yg mengelompokkan per-KALIMAT saja. Word-timestamp sudah
+        # dikumpulkan (word_timestamps=True), tinggal expose ke pipeline.
+        self._cached_segments: list = []
+        self._completed_ok: bool = False
 
     def load(self) -> None:
         # Import ditunda ke sini supaya `import polyscribe` tidak menyeret
@@ -44,6 +52,11 @@ class FasterWhisperBackend(AsrBackend):
         if self._model is None:
             self.load()
 
+        # Reset cache tiap run — kalau backend dipakai ulang untuk file berbeda,
+        # jangan bocor segmen file sebelumnya ke refine_segments().
+        self._cached_segments = []
+        self._completed_ok = False
+
         # PENTING: `multilingual=True` membuat Whisper mendeteksi bahasa ulang
         # PER-WINDOW dan MENGABAIKAN `language` — itu sebabnya pembukaan English
         # Gulf tertebak Melayu walau language="en". Jadi:
@@ -56,13 +69,23 @@ class FasterWhisperBackend(AsrBackend):
         else:
             lang, multilingual = self.primary_language, False
 
+        # Knob VAD & initial_prompt di-inject dari luar (config -> selector). Default
+        # backward-compatible: vad_filter=True + tak ada prompt. Bug user 2026-08:
+        # audio dgn overlap tinggi + VAD kadang bikin Whisper tak beri titik ->
+        # merger kita gagal potong kalimat -> paragraf raksasa. Set vad_filter=False
+        # via config.vad_filter untuk uji. initial_prompt = contoh terpunctuasi ->
+        # Whisper cenderung ikut pola output tsb.
+        vad = bool(getattr(self, "vad_filter", True))
+        init_prompt = getattr(self, "initial_prompt", "") or None
+
         # word_timestamps=True -> tiap segmen bawa daftar kata dgn start/end.
         segments, info = self._model.transcribe(
             wav_16k_mono_path,
             language=lang,
             multilingual=multilingual,
             word_timestamps=True,
-            vad_filter=True,          # buang keheningan panjang, lebih rapi & cepat
+            vad_filter=vad,
+            initial_prompt=init_prompt,
         )
 
         total = float(getattr(info, "duration", 0.0)) or 0.0
@@ -86,6 +109,10 @@ class FasterWhisperBackend(AsrBackend):
                 words=words,
             )
 
+            # Simpan salinan untuk refine_segments() akhir-run. AsrSegment adalah
+            # dataclass; simpan referensi cukup — tak diubah setelah yield.
+            self._cached_segments.append(out)
+
             # Progress mengikuti posisi waktu audio yang sudah ditranskripsi.
             frac = (seg.end / total) if total else 0.0
             progress.emit(ProgressEvent(
@@ -96,3 +123,23 @@ class FasterWhisperBackend(AsrBackend):
             ))
 
             yield out
+
+        # Loop natural exit (tak di-cancel) -> tandai selesai. Kalau pemanggil break
+        # atau generator di-GC di tengah, kode ini TAK jalan -> _completed_ok tetap
+        # False -> refine_segments() kembalikan None -> tak ada re-merge, streaming
+        # output yg sudah di-commit tetap dipakai (ketahanan interupsi terjaga).
+        self._completed_ok = True
+
+    def refine_segments(self):
+        """Kembalikan semua segmen ASR (dgn word timestamp) untuk re-merge akhir-run.
+
+        Kontrak sama dgn WhisperCppVulkanBackend.refine_segments(): dipanggil
+        pipeline SETELAH stream selesai NORMAL. Kalau run dibatalkan/gagal di
+        tengah, kembalikan None -> pipeline pakai output streaming yg sudah
+        di-commit. Teks TIDAK berubah (decode sama), yang berubah cuma presisi
+        penempatan: `_remerge_wordlevel` bisa alokasikan tiap kalimat ke speaker
+        yg tepat via word-level overlap, tak lagi terjebak dominan-per-segmen.
+        """
+        if not self._completed_ok or not self._cached_segments:
+            return None
+        return list(self._cached_segments)

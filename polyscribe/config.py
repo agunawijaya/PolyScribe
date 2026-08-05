@@ -23,6 +23,26 @@ class Config:
     asr_backend: str = "auto"         # "auto" | "faster-whisper" | "whispercpp"
     asr_compute_type: str = ""        # kosong = biar selector yang pilih
 
+    # --- ASR knob untuk kualitas transkrip (bug user 2026-08 kualitas rendah) ---
+    # VAD filter: buang keheningan sebelum decode. Default **False** untuk PolyScribe
+    # (audio rapat) — perubahan dari True awal setelah A/B test klip 6-menit
+    # file 19 (brief BUG_2026-08-05_text_quality): VAD=True menghasilkan Whisper
+    # nyaris tanpa titik/koma -> merger kita gagal potong kalimat -> paragraf
+    # raksasa yg menelan interjeksi orang lain (satu SPEAKER_XX turn 4 menit
+    # padahal 6 orang bicara). VAD=False memberi Whisper konteks utuh -> punctuation
+    # kembali, proper nouns tepat (Digital Dubai, Symphony, dst). Trade-off: sedikit
+    # lebih lambat & keheningan panjang ikut diproses (kadang halusinasi). Untuk
+    # audio single-speaker bersih, set True bisa lebih cepat.
+    vad_filter: bool = False
+    # Initial prompt: contoh text yang di-prepend sebelum decode. Berguna untuk
+    # "nudge" Whisper ke pola output tertentu — mis. tanda baca lengkap, atau
+    # nama-nama peserta/istilah teknis. Kosong = tak ada nudge. Efek verifikasi
+    # A/B: dgn prompt yg berisi nama peserta ("Jaffar Labs, Digital Dubai, MBRL"),
+    # Whisper lebih akurat mengeja proper nouns. Trade-off: bisa halusinasi nama
+    # dari prompt saat audio ambigu (mis. loop "Customer Hagen" 3x). Rekomendasi:
+    # isi HANYA bila Anda tahu nama peserta & istilah teknis file.
+    asr_initial_prompt: str = ""
+
     # --- bahasa ASR ---
     # "en" (default, prioritas English) meneruskan language="en" ke Whisper agar
     # deteksi bahasa stabil di awal file (menghapus salah-deteksi Inggris->Melayu).
@@ -38,6 +58,17 @@ class Config:
     # rekaman lewat toggle GUI / --diarizer. Kalau model pyannote tak terpasang,
     # selector JATUH aman ke "sherpa" (lihat diarization/__init__.py) — tak crash.
     diarizer_choice: str = "pyannote"   # "pyannote" (Akurat, default) | "sherpa" (Cepat)
+    # Device pyannote — "auto" (default): pakai CUDA hanya bila free VRAM cukup
+    # sesudah ASR (yang lebih dulu masuk GPU); kalau tidak, CPU. Akar (bug user 2026-08):
+    # laptop RTX 4060 8 GB — faster-whisper large-v3 float16 makan ~3,2 GB VRAM, sisa
+    # ~3,7 GB tak cukup untuk pyannote community-1 memproses file 1 jam -> CUDA OOM
+    # ("CUDA failed with error out of memory") saat `_pipeline(audio_in)`. "cpu" =
+    # paksa CPU (paling aman; ~2,5x lebih lambat tapi TAK PERNAH OOM). "cuda" = paksa
+    # CUDA (untuk mesin ber-VRAM besar; masih ada retry-CPU otomatis kalau OOM).
+    pyannote_device: str = "auto"
+    # Ambang free VRAM (GB) untuk "auto" memilih CUDA. Nilai = pyannote peak estimate
+    # (~2 GB untuk community-1 di file panjang) + margin. Di bawah ini -> CPU.
+    pyannote_min_free_vram_gb: float = 4.0
     # 0.9 = hasil tuning M1c di file rapat 45 menit: bersama min_duration_on=1.0
     # + pembersih pasca-diarization, menurunkan over-split dari ~40 label jadi
     # ~7 speaker yang masuk akal. (0.7 dari M1 over-split parah di file panjang.)

@@ -76,6 +76,14 @@ def build_config(args) -> Config:
         cfg.allow_vulkan = False
     if args.diarizer:
         cfg.diarizer_choice = args.diarizer
+    # Knob kualitas ASR baru (brief 2026-08). --vad-on/--vad-off overrides default;
+    # bila keduanya tak diset, default config yg dipakai.
+    if getattr(args, "vad_on", False):
+        cfg.vad_filter = True
+    elif getattr(args, "vad_off", False):
+        cfg.vad_filter = False
+    if getattr(args, "initial_prompt", None):
+        cfg.asr_initial_prompt = args.initial_prompt
     return cfg
 
 
@@ -119,6 +127,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="mode pelabelan pembicara: 'pyannote' (Akurat, default — pisah "
              "pertukaran cepat, lebih lambat) atau 'sherpa' (Cepat). Kalau model "
              "pyannote tak terpasang, otomatis jatuh ke sherpa.",
+    )
+    # VAD toggle (brief 2026-08 kualitas teks): default sudah False untuk audio
+    # rapat. Sediakan kedua arah agar user bisa override di sisi mana pun.
+    vad = parser.add_mutually_exclusive_group()
+    vad.add_argument(
+        "--vad-off", action="store_true",
+        help="matikan VAD filter (default; terbukti lebih baik untuk audio rapat "
+             "ber-overlap tinggi — Whisper dapat konteks utuh -> punctuation muncul).",
+    )
+    vad.add_argument(
+        "--vad-on", action="store_true",
+        help="nyalakan VAD filter (buang keheningan; lebih cepat untuk audio "
+             "single-speaker bersih, tapi kadang chop mid-sentence).",
+    )
+    parser.add_argument(
+        "--initial-prompt", default=None, dest="initial_prompt",
+        help="teks yg di-prepend ke Whisper untuk 'nudge' output — mis. daftar "
+             "nama peserta & istilah teknis (\"Meeting with Jaffar Labs, MBRL. "
+             "Discussing Symphony, Summon.\"). Bisa halusinasi kalau prompt "
+             "tak match audio; isi hanya bila Anda tahu isinya.",
     )
     return parser
 

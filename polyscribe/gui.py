@@ -22,7 +22,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from .config import Config
 from .diarization import pyannote_availability
-from .pipeline import run_pipeline_to_queue
+from .pipeline import run_pipeline_to_queue, log_cancel_event
 from .progress import ProgressEvent
 
 
@@ -244,6 +244,10 @@ class PolyScribeApp:
     def on_stop(self):
         # Batal kooperatif: set event, pekerja berhenti rapi sendiri (transkrip
         # parsial di-commit di dalam pipeline). Proses di-join saat selesai.
+        # Instrumentasi: log ke %TEMP%\polyscribe_cancel.log SEBELUM set — bila
+        # nanti Result cancelled=True tanpa entri "gui_stop" di log, kita tahu
+        # cancel_event ter-set dari luar GUI Stop (bug misterius user 2026-08).
+        log_cancel_event(source="gui_stop", detail="user pressed Stop button")
         if self.cancel_event is not None:
             self.cancel_event.set()
         self.stop_btn.config(state="disabled")

@@ -10,7 +10,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from polyscribe.diarization.pyannote_backend import _turns_from_annotation
+from polyscribe.diarization.pyannote_backend import (
+    _pick_pyannote_device,
+    _turns_from_annotation,
+)
 
 
 class _Seg:
@@ -59,6 +62,79 @@ def test_overlap_preserved_as_two_turns():
     turns = _turns_from_annotation(ann)
     assert len(turns) == 2
     assert {t.speaker for t in turns} == {"SPEAKER_00", "SPEAKER_01"}
+
+
+# --- Pemilihan device pyannote (bug user 2026-08 CUDA OOM di RTX 4060 8 GB) ------
+# Diuji dengan torch palsu supaya tak butuh CUDA nyata & torch tak perlu ada.
+
+class _FakeCuda:
+    def __init__(self, available=True, free_gb=8.0):
+        self._available = available
+        self._free_bytes = int(free_gb * (1024 ** 3))
+
+    def is_available(self):
+        return self._available
+
+    def mem_get_info(self):
+        return (self._free_bytes, 8 * (1024 ** 3))
+
+
+class _FakeTorch:
+    def __init__(self, available=True, free_gb=8.0):
+        self.cuda = _FakeCuda(available=available, free_gb=free_gb)
+
+    def device(self, kind):
+        return f"device:{kind}"      # sentinel yang bisa dibandingkan tanpa torch
+
+
+class _Cfg:
+    def __init__(self, choice="auto", min_free_gb=4.0):
+        self.pyannote_device = choice
+        self.pyannote_min_free_vram_gb = min_free_gb
+
+
+def test_pick_device_cpu_when_forced():
+    dev = _pick_pyannote_device(_Cfg(choice="cpu"), _FakeTorch(available=True, free_gb=20))
+    assert dev == "device:cpu"
+
+
+def test_pick_device_cpu_when_no_cuda():
+    dev = _pick_pyannote_device(_Cfg(choice="auto"), _FakeTorch(available=False))
+    assert dev == "device:cpu"
+
+
+def test_pick_device_cuda_when_forced_and_available():
+    dev = _pick_pyannote_device(_Cfg(choice="cuda"), _FakeTorch(available=True, free_gb=1.0))
+    # "cuda" dipaksa -> lewati ambang free VRAM (retry-CPU di diarize jadi jaring pengaman).
+    assert dev == "device:cuda"
+
+
+def test_pick_device_auto_picks_cuda_when_vram_ample():
+    # 6 GB free >= 4 GB ambang -> CUDA.
+    dev = _pick_pyannote_device(_Cfg(choice="auto", min_free_gb=4.0),
+                                _FakeTorch(available=True, free_gb=6.0))
+    assert dev == "device:cuda"
+
+
+def test_pick_device_auto_picks_cpu_when_vram_tight():
+    # Kasus bug user: RTX 4060 8 GB, sesudah ASR ambil ~3,2 GB, free ~3,5 GB < 4 GB ambang.
+    dev = _pick_pyannote_device(_Cfg(choice="auto", min_free_gb=4.0),
+                                _FakeTorch(available=True, free_gb=3.5))
+    assert dev == "device:cpu"
+
+
+def test_pick_device_auto_falls_to_cpu_when_mem_get_info_fails():
+    # Beberapa driver melempar saat mem_get_info dipanggil terlalu awal — aman: CPU.
+    class _BustedCuda(_FakeCuda):
+        def mem_get_info(self):
+            raise RuntimeError("driver hiccup")
+    class _BustedTorch:
+        def __init__(self):
+            self.cuda = _BustedCuda(available=True, free_gb=8.0)
+        def device(self, kind):
+            return f"device:{kind}"
+    dev = _pick_pyannote_device(_Cfg(choice="auto"), _BustedTorch())
+    assert dev == "device:cpu"
 
 
 if __name__ == "__main__":

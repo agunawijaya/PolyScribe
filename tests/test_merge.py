@@ -168,6 +168,54 @@ def test_no_diarization_uses_placeholder():
     assert lines[0].text == "solo"
 
 
+def test_sentence_cap_breaks_long_blob_at_speaker_change():
+    """Regresi bug user 2026-08 kualitas rendah: Whisper tanpa punctuation +
+    audio ber-overlap -> tanpa cap, satu 'kalimat' 60 dtk menjelma paragraf
+    raksasa yg ditugaskan ke SATU speaker. Cap memaksa break di batas speaker
+    sehingga tiap orang dapat turn-nya sendiri.
+
+    Skenario: 3 speaker turns berturut (A/B/A) 6 dtk masing-masing, 18 kata
+    tanpa titik. Cap 3 dtk -> break diharapkan di transisi speaker (word 5->6
+    A->B, word 11->12 B->A). Dominant per-bagian: A, B, A -> 3 blok (tanpa lebur)."""
+    turns = [
+        SpeakerTurn(0.0, 6.0, "SPEAKER_00"),
+        SpeakerTurn(6.0, 12.0, "SPEAKER_01"),
+        SpeakerTurn(12.0, 18.0, "SPEAKER_00"),
+    ]
+    # 18 kata @ 1 dtk, tanpa titik. Word i berada persis dalam turn floor(i/6).
+    words = [(float(i), float(i) + 0.9, f"w{i}") for i in range(18)]
+    segs = [_seg(0.0, 18.0, " ".join(w[2] for w in words), words)]
+    # sentence_max_s=3 -> cap aktif sesudah span 3 dtk & break di transisi speaker
+    out = _stream(turns, segs, sentence_max_s=3.0)
+    speakers = [l.speaker for l in out]
+    # Harus DUA speaker unik (SPEAKER_00 & SPEAKER_01) — tanpa cap semua akan lebur
+    # ke satu blob 18 kata di SPEAKER_00 (dominan overlap 12/18 dtk).
+    assert len(set(speakers)) == 2, (
+        f"Expected multi-speaker attribution after speaker-cap break, got {speakers}")
+    assert len(out) >= 3, (
+        f"Expected >=3 blocks (A/B/A pattern), got {len(out)} blocks: {out}")
+
+
+def test_sentence_cap_no_effect_on_short_sentence():
+    """Cap TIDAK boleh mengganggu kalimat pendek yang normal-punctuated —
+    hanya jaring pengaman untuk kasus patologis."""
+    turns = [
+        SpeakerTurn(0.0, 2.0, "SPEAKER_00"),
+        SpeakerTurn(2.0, 4.0, "SPEAKER_01"),
+    ]
+    segs = [
+        _seg(0.0, 1.8, "hello there.",
+             [(0.0, 0.8, "hello"), (0.9, 1.7, "there.")]),
+        _seg(2.1, 3.9, "hi back.",
+             [(2.1, 2.8, "hi"), (3.0, 3.9, "back.")]),
+    ]
+    # sentence_max_s default 15 — kalimat pendek tak terpengaruh.
+    out = _stream(turns, segs)
+    assert len(out) == 2
+    assert out[0].text == "hello there."
+    assert out[1].text == "hi back."
+
+
 if __name__ == "__main__":
     # Runner ringan tanpa pytest — biar bisa jalan di venv minimal.
     import traceback

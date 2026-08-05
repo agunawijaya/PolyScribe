@@ -41,12 +41,18 @@ def _faster_whisper_for(caps, config) -> AsrBackend:
 
 def _fw(config, device, default_compute) -> AsrBackend:
     """Bangun FasterWhisperBackend dengan setelan dari config (satu tempat)."""
-    return FasterWhisperBackend(
+    be = FasterWhisperBackend(
         config.faster_whisper_dir,
         device=device,
         compute_type=config.asr_compute_type or default_compute,
         primary_language=getattr(config, "primary_language", "en"),
     )
+    # Knob kualitas (opt-in di config; default backward-compatible). Set sbg
+    # atribut instance karena FasterWhisperBackend.__init__ tidak menerimanya —
+    # transcribe() baca via getattr dgn default aman.
+    be.vad_filter = bool(getattr(config, "vad_filter", True))
+    be.initial_prompt = str(getattr(config, "asr_initial_prompt", "") or "")
+    return be
 
 
 def _whispercpp(config) -> AsrBackend:

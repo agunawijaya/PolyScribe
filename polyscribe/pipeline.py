@@ -7,7 +7,9 @@ langsung digabung & DITULIS INKREMENTAL ke .txt. Kalau run panjang terputus
 karena baru ditulis di akhir.
 """
 
+import os
 import tempfile
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -27,6 +29,30 @@ from .progress import ProgressEvent, ProgressSink
 _LOOP_NOTE = ("=== PERINGATAN: kemungkinan loop/halusinasi ASR terdeteksi — "
               "pengulangan otomatis DIPANGKAS (disisakan satu instans). "
               "Periksa bagian ini. ===")
+
+
+def _cancel_log_path() -> Path:
+    """File log kecil untuk melacak siapa yang men-cancel run (bug misterius
+    user 2026-08: Mode Cepat berakhir 'Dihentikan' tanpa user pencet Stop).
+
+    Ditaruh di %TEMP% agar tak mengotori repo & tak butuh izin tulis proyek.
+    Setiap baris = satu event bersumber (gui_stop / pipeline_saw_cancel / ...).
+    Bila Result.cancelled=True tapi log TAK punya baris 'gui_stop' dekat waktunya,
+    ada aktor lain yang set cancel_event -> perlu diselidiki."""
+    return Path(os.environ.get("TEMP", tempfile.gettempdir())) / "polyscribe_cancel.log"
+
+
+def log_cancel_event(source: str, detail: str = "") -> None:
+    """Tambah satu baris ke log cancel. Aman dipanggil dari proses mana pun
+    (parent GUI atau child pipeline) — best-effort, tak boleh menggagalkan run
+    kalau file tak bisa ditulis."""
+    try:
+        line = (f"{time.strftime('%Y-%m-%d %H:%M:%S')} pid={os.getpid()} "
+                f"source={source} {detail}\n")
+        with open(_cancel_log_path(), "a", encoding="utf-8") as fh:
+            fh.write(line)
+    except OSError:
+        pass  # log rusak/permission — jangan biarkan diagnostik menjatuhkan run.
 
 
 def _guard_segment(detector, seg):
@@ -76,8 +102,19 @@ def transcribe_file(audio_path: str, config, sink: ProgressSink,
     # dibatalkan (perilaku lama CLI). Batal itu kooperatif: kita cek di antara
     # segmen ASR, lalu tutup rapi. Karena .txt ditulis inkremental, transkrip
     # parsial tetap aman di disk.
+    # Instrumentasi cancel (bug user 2026-08): setiap kali pipeline melihat
+    # cancel_event ter-set, catat SEKALI dengan lokasi. Kalau log akhirnya berisi
+    # 'pipeline_saw_cancel' tanpa 'gui_stop' terdekat, cancel_event ter-set dari
+    # sumber lain (bukan tombol Stop). Flag lokal supaya log tak spam.
+    _cancel_logged = {"done": False}
+
     def _is_cancelled() -> bool:
-        return cancel_event is not None and cancel_event.is_set()
+        set_now = cancel_event is not None and cancel_event.is_set()
+        if set_now and not _cancel_logged["done"]:
+            log_cancel_event(source="pipeline_saw_cancel",
+                             detail=f"first observed in transcribe_file for {audio_path}")
+            _cancel_logged["done"] = True
+        return set_now
 
     # Validasi file lebih awal — sebelum emit progress apa pun — supaya tidak
     # muncul "memuat model 0%" sekejap lalu error (membingungkan).
@@ -278,6 +315,13 @@ def run_pipeline_to_queue(audio_path, config, out_queue, cancel_event=None) -> N
 
     Kontrak antrean sama seperti jalur thread lama: ("progress", event) selama
     jalan, lalu tepat satu ("done", Result) atau ("error", Exception) di akhir."""
+    # Baseline log (bug user 2026-08): catat state awal cancel_event saat child
+    # spawn. Kalau sudah True di sini, artinya event ter-set SEBELUM child jalan
+    # -> masalah di parent (mis. event ter-reuse dari run sebelumnya). Kalau False,
+    # tapi Result akhir cancelled=True, artinya event ter-set di TENGAH jalan.
+    initial_set = cancel_event is not None and cancel_event.is_set()
+    log_cancel_event(source="pipeline_start",
+                     detail=f"initial cancel_event.is_set()={initial_set} for {audio_path}")
     try:
         sink = _QueueProgressSink(out_queue)
         res = transcribe_file(audio_path, config, sink, cancel_event=cancel_event)
