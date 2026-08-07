@@ -156,7 +156,7 @@ Setup tambahan untuk mesin ber-GPU NVIDIA (brief NVIDIA_00/01/02):
 Reproduksi di mesin lain (pakai versi terkunci):
     & $py -m pip install -r requirements.lock.txt
 
-Unit test (75 hijau; jalankan semua 10 file di tests\):
+Unit test (83 hijau; jalankan semua 11 file di tests\):
     & Get-ChildItem tests\test_*.py | ForEach-Object { & $py $_.FullName }
     # atau per file, mis.:  & $py tests\test_merge.py ; & $py tests\test_diarizer_toggle.py
 
