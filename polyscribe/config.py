@@ -15,6 +15,34 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = PROJECT_ROOT / "models"
 
 
+# Contoh pola tanda baca per bahasa (brief 51). Dipakai sebagai initial prompt untuk
+# whisper-cli: bukan untuk memberi tahu ISI rapat, hanya untuk MENUNJUKKAN pola output
+# yang benar (titik, koma, tanya) supaya whisper tak tergelincir ke mode tanpa tanda
+# baca — keadaan yang mengunci diri karena konteks yang diwariskannya juga tanpa tanda
+# baca. Kalimat sengaja generik dan TANPA nama orang/tempat: prompt berisi nama terbukti
+# memicu halusinasi nama saat audio ambigu.
+#
+# HANYA "en" — sengaja. Dua percobaan di fixture Arab 90 detik, keduanya GAGAL:
+#   - prompt INGGRIS pada audio Arab -> whisper MENERJEMAHKAN, bukan mentranskripsi
+#     (100% huruf Arab jadi 0%; teks keluar sebagai kalimat Inggris);
+#   - prompt ARAB pada audio Arab -> output runtuh jadi 3 segmen identik
+#     (tanpa prompt: 15 segmen, teks Arab wajar, 5,3 tanda baca/100 kata).
+# Keduanya kerusakan SENYAP yang jauh lebih buruk daripada tanda baca yang hilang.
+# Indonesia belum diuji (tak ada fixture), jadi juga tak diberi prompt. Prinsipnya:
+# knob ini hanya menyala di jalur yang sudah diukur.
+#
+# Catatan teknis: dengan -mc 24 whisper hanya memakai ~23 token TERAKHIR dari prompt
+# ("initial prompt is too long ... will use only the last N tokens"). Jadi ekor kalimat
+# harus contoh tanda baca yang baik — itu sebabnya string di bawah diakhiri kalimat
+# pendek bertitik. Jangan mengubah teksnya tanpa mengukur ulang; angka 13,1 -> 20,1
+# diukur dengan string PERSIS ini.
+ASR_PUNCTUATION_PROMPTS = {
+    "en": ("Okay, so let me explain how it works. First, we check the shelf. "
+           "Then, if the book is missing, we report it. Yes, that is correct. "
+           "Thank you very much."),
+}
+
+
 @dataclass
 class Config:
     # --- pemilihan hardware / backend ---
@@ -42,6 +70,11 @@ class Config:
     # dari prompt saat audio ambigu (mis. loop "Customer Hagen" 3x). Rekomendasi:
     # isi HANYA bila Anda tahu nama peserta & istilah teknis file.
     asr_initial_prompt: str = ""
+    # Ulangi initial prompt di SETIAP jendela (whisper-cli --carry-initial-prompt),
+    # bukan hanya jendela pertama. Relevan karena tanda baca runtuh per-WILAYAH di
+    # tengah/akhir file, bukan cuma di awal — nudge sekali di awal tak menolong
+    # wilayah menit ke-35. Tak berefek bila asr_initial_prompt kosong.
+    asr_carry_initial_prompt: bool = True
 
     # --- bahasa ASR ---
     # "en" (default, prioritas English) meneruskan language="en" ke Whisper agar
@@ -92,6 +125,23 @@ class Config:
     diar_min_turn: float = 0.5
     diar_min_speaker_frac: float = 0.010
 
+    # --- preset mode AKURAT (pyannote) — brief 50 ---
+    # Ketiga knob di atas + merge_island_max_s adalah hasil tuning SHERPA: obat untuk
+    # over-split sherpa yang kasar. pyannote tak punya penyakit itu (overlap-aware,
+    # embedding lebih tajam), jadi knob yang sama justru MENGHAPUS keunggulannya —
+    # cleanup menyerap turn pendek dan island-suppression melebur blok <=4 s yang
+    # terjepit di antara dua blok speaker sama, yaitu bentuk persis interjeksi cepat.
+    # Nilai 0 = tanpa perataan; ini config yang dipakai brief 39 saat memvalidasi
+    # pyannote jadi default, tapi TAK PERNAH di-wire ke produk (report 38 §6c).
+    # Bukti brief 50 (Standard recording 22, teks ASR identik):
+    #   Cepat 72 baris / 42% kata di blok >=60s | Akurat-lama 70 / 44% (tak lebih baik
+    #   dari Cepat padahal 2,3x lebih lambat) | Akurat-preset 89 / 37%.
+    # Dari 9 pulau yang dulu dihapus, mayoritas terbukti pergantian NYATA (dicek isi;
+    # Whisper bahkan menandainya dgn "- "). Sisa cacat: sesekali satu kata terpotong.
+    pyannote_diar_min_turn: float = 0.0
+    pyannote_diar_min_speaker_frac: float = 0.0
+    pyannote_merge_island_max_s: float = 0.0
+
     # Merge level-kalimat (Track B): "island" = blok speaker pendek terjepit di
     # antara dua blok speaker SAMA (A-[b]-A). <= nilai ini dilebur ke speaker
     # tetangga (indikator kuat pergantian palsu #1). 4.0s cukup menutup kasus 09b
@@ -110,7 +160,27 @@ class Config:
     # word-level JSON & -ml TAK menambah granularitas (akar = tanda baca, bukan
     # word-timestamp — terbukti: segment/word/-ml identik di -mc sama). loopguard
     # TETAP menyala sebagai jaring pengaman terakhir.
-    whispercpp_max_context: int = 8
+    #
+    # BRIEF 51 — DINAIKKAN 8 -> 24. Nilai 8 dipilih dari sweep di atas yang menimbang
+    # LOOP saja; rekaman user 22 (43 mnt) menunjukkan ongkos sisi lain terlalu mahal:
+    # tanda baca runtuh ke 8,2/100 kata (gerbang sahih brief 39 = 15) -> merge, yang
+    # memotong giliran per KALIMAT, melebur 37% teks jadi blok >=60 detik berisi
+    # beberapa pembicara. Sweep di file itu (ASR diulang, diarization sama):
+    #   -mc  8: tanda baca  8,2 | 2 loop | 11 blok besar | 37% teks | (baseline)
+    #   -mc 12: tanda baca  3,2 | 2 loop | 13 blok besar | 46% teks
+    #   -mc 16: tanda baca  4,3 | 0 loop | 13 blok besar | 43% teks
+    #   -mc 24: tanda baca 13,1 | 0 loop |  7 blok besar | 24% teks  <- menang semua
+    # Loop TURUN saat konteks naik di file ini (2,2,0,0) — bukan naik. 24 juga paling
+    # cepat. Zona 12-16 berisik, sesuai catatan brief 23.
+    #
+    # RISIKO YANG BELUM TERUKUR (jujur): sweep brief 23 yang memilih 8 diukur di
+    # Std-12 PENUH (102 mnt) dgn loop di 47:37 & 1:12:21. Bukti terpanjang yang ada
+    # sekarang cuma 43 mnt — file Std-12 sudah tak ada di mesin ini, jadi regime
+    # >45 mnt TAK teruji. Kalau muncul rekaman panjang, jalankan
+    # prompts\scripts\tester51_mc_loopgate.py (ganti FIXTURE) sebelum percaya diri.
+    # Peringan: loopguard kini memangkas loop LINTAS-segmen & selalu menandai, jadi
+    # kegagalan terlihat, tak senyap. Untuk kembali ke perilaku lama: setel 8 di sini.
+    whispercpp_max_context: int = 24
 
     # Substring nama file model embedding pilihan (kosong = auto, WeSpeaker/ResNet
     # diutamakan). Diisi mis. "wespeaker" untuk mengunci model tertentu.
@@ -189,6 +259,34 @@ class Config:
     # --- model (offline; diisi absolut saat runtime bila kosong) ---
     whisper_model: str = "large-v3"   # nama subfolder di models/faster-whisper-*
     models_dir: Path = field(default_factory=lambda: MODELS_DIR)
+
+    def effective_initial_prompt(self) -> str:
+        """Initial prompt yang benar-benar dipakai backend whisper-cli.
+
+        Urutan: prompt eksplisit dari user menang; kalau kosong, pakai contoh pola
+        tanda baca SEBAHASA audio dari ASR_PUNCTUATION_PROMPTS. Bahasa "auto" tak
+        dapat prompt (lihat catatan tabel: salah bahasa = whisper menerjemahkan).
+
+        Sengaja TIDAK dipakai faster-whisper: keruntuhan tanda baca yang jadi alasan
+        knob ini diukur pada whisper.cpp (yang mewariskan transkrip sebagai konteks
+        lewat -mc). Jangan mengubah backend yang belum diukur."""
+        explicit = (self.asr_initial_prompt or "").strip()
+        if explicit:
+            return explicit
+        return ASR_PUNCTUATION_PROMPTS.get(str(self.primary_language).lower(), "")
+
+    def tuning_for_diarizer(self, diarizer_name: str):
+        """(min_turn, min_speaker_frac, island_max_s) untuk diarizer yang BENAR-BENAR
+        dipakai — bukan yang diminta.
+
+        Dipanggil setelah fallback diselesaikan, jadi kalau mode Akurat jatuh ke
+        sherpa, knob sherpa ikut terpakai. Lihat catatan preset di atas."""
+        if diarizer_name == "pyannote":
+            return (self.pyannote_diar_min_turn,
+                    self.pyannote_diar_min_speaker_frac,
+                    self.pyannote_merge_island_max_s)
+        return (self.diar_min_turn, self.diar_min_speaker_frac,
+                self.merge_island_max_s)
 
     @property
     def faster_whisper_dir(self) -> Path:

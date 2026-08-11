@@ -71,6 +71,28 @@ def test_cli_rejects_bad_diarizer():
     raise AssertionError("--diarizer bogus seharusnya ditolak")
 
 
+def test_tuning_preset_differs_per_diarizer():
+    """Brief 50: knob cleanup/merge default = hasil tuning SHERPA. Mode Akurat
+    (pyannote) harus memakai preset sendiri (tanpa perataan), bukan knob sherpa —
+    kalau tidak, interjeksi cepat yang jadi alasan mode ini ada malah diratakan."""
+    cfg = Config()
+    sherpa = cfg.tuning_for_diarizer("sherpa")
+    pyannote = cfg.tuning_for_diarizer("pyannote")
+    assert sherpa == (cfg.diar_min_turn, cfg.diar_min_speaker_frac,
+                      cfg.merge_island_max_s)
+    assert pyannote == (0.0, 0.0, 0.0)
+    assert sherpa != pyannote, "preset Akurat tak boleh sama dengan knob sherpa"
+
+
+def test_tuning_follows_actual_diarizer_after_fallback():
+    # Mode Akurat diminta tapi jatuh ke sherpa: knob yang dipakai HARUS knob sherpa.
+    cfg = Config()
+    cfg.diarizer_choice = "pyannote"
+    assert cfg.tuning_for_diarizer("sherpa") == (cfg.diar_min_turn,
+                                                 cfg.diar_min_speaker_frac,
+                                                 cfg.merge_island_max_s)
+
+
 def _parse_cli(argv):
     """Pakai parser CLI YANG ASLI (bukan tiruan) supaya tak bisa melenceng."""
     return build_parser().parse_args(argv)

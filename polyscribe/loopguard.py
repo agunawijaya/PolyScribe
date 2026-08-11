@@ -14,6 +14,7 @@ Yes.") tidak ditandai palsu:
 
 import re
 from collections import deque
+from dataclasses import replace
 
 
 def _normalize(text: str) -> str:
@@ -100,6 +101,68 @@ def collapse_token_repeats(tokens, text_of=lambda x: x,
             out.append(tokens[i])
             i += 1
     return out, trimmed
+
+
+def collapse_stream_repeats(segments, min_len: int = 2, max_len: int = 15,
+                            min_repeat: int = 6):
+    """Pangkas frasa berulang berturut-turut LINTAS segmen, atas aliran kata utuh.
+
+    Kenapa perlu (bug user 2026-08-10, rekaman 22). `collapse_token_repeats` bekerja
+    di DALAM satu segmen. Tapi saat whisper.cpp macet, ia memuntahkan loop sebagai
+    segmen-segmen terpisah ~1 detik yang masing-masing berisi SATU instans — jadi
+    tak ada pengulangan yang terlihat dari dalam satu segmen, dan pemangkas itu
+    tak pernah kena. Penekan lintas-segmen di `_guard_segment` baru menyala setelah
+    6 segmen near-identik, jadi 5-6 salinan pertama selalu lolos ke .txt.
+    Diukur di rekaman 22: 'What is it?' tersebar di 11 segmen, 'a lot of visitors
+    keep asking me i want this book' di 12 segmen.
+
+    Di sini kita ratakan dulu semua kata jadi satu aliran, baru cari pengulangan —
+    jadi batas segmen tak lagi menyembunyikan loop. Ambang pengulangan TETAP SAMA
+    (min_repeat=6); yang naik hanya `max_len` (6 -> 15) supaya unit panjang seperti
+    contoh di atas (11 kata) ikut terlihat. Butuh 6 pengulangan PERSIS berturut-turut,
+    jadi ucapan normal tak tersentuh: di rekaman 22 hanya 2 titik yang lolos ambang,
+    keduanya memang halusinasi.
+
+    Dipakai pada jalur akhir word-level (selesai normal), yang memang melihat SELURUH
+    file sekaligus — jalur streaming tak bisa menoleh ke belakang, dan itu tak apa:
+    ia ada untuk ketahanan interupsi, bukan hasil akhir.
+
+    Kembalikan (segments_baru, daftar_waktu_pangkas)."""
+    flat = [(i, w) for i, s in enumerate(segments) for w in getattr(s, "words", [])]
+    if not flat:
+        return segments, []
+
+    norm = [_normalize(w.text) for _, w in flat]
+    keep, times = [], []
+    i = 0
+    while i < len(flat):
+        plen, reps = _repeat_run(norm, i, min_len, max_len)
+        if reps >= min_repeat:
+            keep.extend(flat[i:i + plen])       # sisakan satu instans
+            times.append(flat[i][1].start)
+            i += plen * reps
+        else:
+            keep.append(flat[i])
+            i += 1
+
+    if not times:
+        return segments, []                     # tak ada yang dipangkas: jangan sentuh
+
+    per = {}
+    for idx, w in keep:
+        per.setdefault(idx, []).append(w)
+
+    out = []
+    for idx, seg in enumerate(segments):
+        words = per.get(idx)
+        if seg.words and not words:
+            continue                            # seluruh isi segmen ini pengulangan
+        if words is not None and len(words) != len(seg.words):
+            out.append(replace(seg, words=words,
+                               text=" ".join(w.text.strip() for w in words).strip()))
+        else:
+            out.append(seg)
+    return out, times
 
 
 def collapse_repeats(text: str, **kwargs):

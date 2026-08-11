@@ -142,6 +142,22 @@ class WhisperCppVulkanBackend(AsrBackend):
         except Exception:
             total = 0.0
 
+        cmd = self._build_cmd(wav_16k_mono_path, base, lang)
+
+        # stdout = segmen (dibaca progresif); stderr = log Vulkan/info. text +
+        # bufsize=1 supaya baris tak nge-buffer. Kedua stream dibaca di thread
+        # pembaca sendiri -> loop utama bisa cek cancel tiap ~0.2 s (Stop cepat).
+        # PENTING (BUG-1 Arab): whisper-cli mencetak teks UTF-8. Tanpa encoding=
+        # eksplisit, text=True memakai locale Windows (cp1252) -> byte Arab memicu
+        # UnicodeDecodeError di thread pembaca -> run hang & .txt kosong. Kunci
+        # UTF-8 + errors="replace" (jangan pernah mati gara-gara satu byte aneh).
+        return self._run(cmd, progress, cancel_event, total,
+                         wav_16k_mono_path, lang)
+
+    def _build_cmd(self, wav_16k_mono_path: str, base: str, lang: str) -> list:
+        """Susun baris perintah whisper-cli. Dipisah dari transcribe() supaya bisa
+        diuji unit — flag yang salah/absen pernah lolos diam-diam (asr_initial_prompt
+        tak pernah tersambung ke backend ini sampai 2026-08-10)."""
         cmd = [
             str(self.exe),
             "-m", str(self.model),
@@ -174,13 +190,26 @@ class WhisperCppVulkanBackend(AsrBackend):
             "-of", base,
         ]
 
-        # stdout = segmen (dibaca progresif); stderr = log Vulkan/info. text +
-        # bufsize=1 supaya baris tak nge-buffer. Kedua stream dibaca di thread
-        # pembaca sendiri -> loop utama bisa cek cancel tiap ~0.2 s (Stop cepat).
-        # PENTING (BUG-1 Arab): whisper-cli mencetak teks UTF-8. Tanpa encoding=
-        # eksplisit, text=True memakai locale Windows (cp1252) -> byte Arab memicu
-        # UnicodeDecodeError di thread pembaca -> run hang & .txt kosong. Kunci
-        # UTF-8 + errors="replace" (jangan pernah mati gara-gara satu byte aneh).
+        # Initial prompt — knob `asr_initial_prompt` SEBELUMNYA hanya tersambung ke
+        # faster-whisper, jadi di laptop AMD (yang selalu memakai backend ini) ia
+        # diam-diam tak berefek apa pun. Ditemukan 2026-08-10 saat mengejar akar
+        # tanda baca yang runtuh. Gunanya: menyuapkan contoh kalimat BERTANDA BACA
+        # supaya whisper tetap di pola output yang benar.
+        # `--carry-initial-prompt` menyuntik ulang contoh itu di SETIAP jendela,
+        # bukan cuma jendela pertama — penting karena tanda baca terbukti runtuh
+        # per-wilayah di tengah/akhir file, bukan cuma di awal (rekaman 22: bagus
+        # 16-20 per 100 kata di menit 5-35, lalu 0,0 di menit 35-45).
+        # Prompt HARUS sebahasa audio — lihat Config.effective_initial_prompt.
+        getter = getattr(self.config, "effective_initial_prompt", None)
+        prompt = (getter() if callable(getter)
+                  else getattr(self.config, "asr_initial_prompt", "") or "").strip()
+        if prompt:
+            cmd += ["--prompt", prompt]
+            if getattr(self.config, "asr_carry_initial_prompt", True):
+                cmd += ["--carry-initial-prompt"]
+        return cmd
+
+    def _run(self, cmd, progress, cancel_event, total, wav_16k_mono_path, lang):
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,

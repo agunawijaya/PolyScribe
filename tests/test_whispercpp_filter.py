@@ -50,6 +50,62 @@ def test_words_from_tokens_empty():
     assert _words_from_tokens([_tok("[_BEG_]", 0, 0), _tok("[_TT_50]", 0, 0)]) == []
 
 
+def _cmd(**overrides):
+    """Baris perintah whisper-cli yang SEBENARNYA dibangun, dari Config asli."""
+    from polyscribe.config import Config
+    from polyscribe.asr.whispercpp_backend import WhisperCppVulkanBackend
+    cfg = Config()
+    for k, v in overrides.items():
+        setattr(cfg, k, v)
+    return WhisperCppVulkanBackend(cfg)._build_cmd("a.wav", "a", "en")
+
+
+def test_cmd_uses_config_max_context():
+    from polyscribe.config import Config
+    cmd = _cmd()
+    assert "-mc" in cmd
+    assert cmd[cmd.index("-mc") + 1] == str(Config().whispercpp_max_context)
+
+
+def test_cmd_passes_initial_prompt():
+    """Regresi 2026-08-10: `asr_initial_prompt` hanya tersambung ke faster-whisper,
+    jadi di laptop AMD (backend ini) knob-nya diam-diam mati. Sekarang dijaga tes."""
+    cmd = _cmd(asr_initial_prompt="Halo. Ini contoh, dengan tanda baca.")
+    assert "--prompt" in cmd
+    assert cmd[cmd.index("--prompt") + 1] == "Halo. Ini contoh, dengan tanda baca."
+    assert "--carry-initial-prompt" in cmd      # default: ulangi tiap jendela
+
+
+def test_cmd_carry_can_be_disabled():
+    cmd = _cmd(asr_initial_prompt="Contoh.", asr_carry_initial_prompt=False)
+    assert "--prompt" in cmd and "--carry-initial-prompt" not in cmd
+
+
+def test_default_prompt_only_for_english():
+    """GERBANG KESELAMATAN (brief 51). Diukur di fixture Arab 90 detik:
+      - prompt Inggris pada audio Arab -> whisper MENERJEMAHKAN (100% Arab -> 0%);
+      - prompt Arab pada audio Arab -> output runtuh jadi 3 segmen identik.
+    Jadi prompt default HANYA boleh menyala untuk bahasa yang sudah diukur (en).
+    Kalau tes ini merah, transkrip Arab user rusak SENYAP — jangan dilonggarkan
+    tanpa mengukur ulang di fixture Arab."""
+    from polyscribe.config import Config
+    en = Config()
+    en.primary_language = "en"
+    assert en.effective_initial_prompt(), "en harus dapat contoh tanda baca"
+    for lang in ("ar", "id", "auto"):
+        cfg = Config()
+        cfg.primary_language = lang
+        assert cfg.effective_initial_prompt() == "", f"{lang} tak boleh dapat prompt"
+        cmd = _cmd(primary_language=lang)
+        assert "--prompt" not in cmd, f"--prompt bocor ke bahasa {lang}"
+
+
+def test_explicit_prompt_wins_over_language_default():
+    # User yang sengaja mengisi prompt tetap dihormati, bahasa apa pun.
+    cmd = _cmd(primary_language="ar", asr_initial_prompt="Contoh, dengan tanda baca.")
+    assert cmd[cmd.index("--prompt") + 1] == "Contoh, dengan tanda baca."
+
+
 if __name__ == "__main__":
     import traceback
     passed = failed = 0

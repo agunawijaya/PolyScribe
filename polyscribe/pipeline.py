@@ -20,7 +20,8 @@ from .diarization.cleanup import cleanup_turns
 from .hardware import detect
 from .merge import StreamingMerger, relabel_turns_contiguous, MergedLine
 from .formatting import IncrementalTxtWriter, output_path_for, format_timestamp
-from .loopguard import LoopDetector, collapse_repeats, collapse_token_repeats
+from .loopguard import (LoopDetector, collapse_repeats, collapse_stream_repeats,
+                        collapse_token_repeats)
 from .progress import ProgressEvent, ProgressSink
 
 
@@ -83,6 +84,39 @@ def _guard_segment(detector, seg):
         seg_out = replace(seg, text=new_text) if trimmed else seg
     note = _LOOP_NOTE if (fired or trimmed) else None
     return seg_out, note
+
+
+class _ChronoWriter:
+    """Bungkus writer supaya PENANDA loop keluar pada urutan WAKTU yang benar.
+
+    Akar (bug user 2026-08-10, `Standard recording 22.txt`): penanda ditulis pada
+    MOMEN segmen loop terdeteksi, sedangkan baris transkrip selalu TERTINGGAL —
+    StreamingMerger menahan kalimat yang belum tuntas plus `lookahead` blok. Jadi
+    penanda [00:10:12] mendarat sebelum baris [00:09:12]: timestamp di .txt mundur,
+    dan penanda menunjuk bagian yang salah (user membaca zona yang keliru).
+
+    Obat: tahan penanda, tulis tepat sebelum baris pertama yang MULAI pada atau
+    sesudah waktu penanda. Isi tak berubah, urutan jadi monoton naik.
+    """
+
+    def __init__(self, writer):
+        self.writer = writer
+        self._pending = []          # (waktu_detik, teks_penanda), sudah urut waktu
+
+    def note(self, when: float, text: str) -> None:
+        self._pending.append((when, text))
+
+    def line(self, line) -> None:
+        self._flush_until(line.start)
+        self.writer.write_line(line)
+
+    def flush(self) -> None:
+        """Keluarkan sisa penanda (mis. loop di ekor file, tak ada baris sesudahnya)."""
+        self._flush_until(float("inf"))
+
+    def _flush_until(self, t: float) -> None:
+        while self._pending and self._pending[0][0] <= t:
+            self.writer.write_note(self._pending.pop(0)[1])
 
 
 @dataclass
@@ -155,13 +189,14 @@ def transcribe_file(audio_path: str, config, sink: ProgressSink,
     diarizer = load_diarizer_with_fallback(diarizer, config, sink)
     sink.emit(ProgressEvent(stage="load", fraction=1.0, message="model siap"))
 
+    # Knob cleanup/merge mengikuti diarizer yang BENAR-BENAR dipakai (sesudah
+    # fallback), bukan yang diminta — lihat Config.tuning_for_diarizer (brief 50).
+    min_turn, min_speaker_frac, island_max_s = config.tuning_for_diarizer(diarizer.name)
+
     # --- Diarization DULU (cepat) supaya label speaker siap sebelum ASR ---
     turns = diarizer.diarize(wav16k, sink, stereo_path=wav_stereo)
-    turns = cleanup_turns(
-        turns,
-        min_turn=getattr(config, "diar_min_turn", 1.0),
-        min_speaker_frac=getattr(config, "diar_min_speaker_frac", 0.015),
-    )
+    turns = cleanup_turns(turns, min_turn=min_turn,
+                          min_speaker_frac=min_speaker_frac)
     # Label distabilkan di depan (kontigu, urutan waktu) — perlu untuk streaming.
     turns = relabel_turns_contiguous(turns)
 
@@ -174,11 +209,9 @@ def transcribe_file(audio_path: str, config, sink: ProgressSink,
                       speakers=[], cancelled=True)
 
     # --- ASR di-stream: tiap segmen langsung digabung & ditulis inkremental ---
-    merger = StreamingMerger(
-        turns,
-        island_max_s=getattr(config, "merge_island_max_s", 4.0),
-    )
+    merger = StreamingMerger(turns, island_max_s=island_max_s)
     writer = IncrementalTxtWriter(audio_path)
+    chrono = _ChronoWriter(writer)   # penanda loop ditulis pada urutan waktu
     detector = LoopDetector()   # jaring pengaman: tandai loop halusinasi (brief 18)
     loop_times: list[float] = []
     lines: list[MergedLine] = []
@@ -191,14 +224,14 @@ def transcribe_file(audio_path: str, config, sink: ProgressSink,
             seg2, note = _guard_segment(detector, seg)
             if note:
                 ts = format_timestamp(seg.start)
-                writer.write_note(f"[{ts}] {note}")
+                chrono.note(seg.start, f"[{ts}] {note}")
                 loop_times.append(seg.start)
                 sink.emit(ProgressEvent(
                     stage="transcribe", fraction=0.0,
                     message=f"PERINGATAN: loop ASR dipangkas di {ts}"))
             if seg2 is not None:
                 for line in merger.feed(seg2):
-                    writer.write_line(line)
+                    chrono.line(line)
                     lines.append(line)
             # Cek batal di antara segmen (batas kalimat aman untuk berhenti).
             if _is_cancelled():
@@ -212,8 +245,9 @@ def transcribe_file(audio_path: str, config, sink: ProgressSink,
         # Tutup blok terakhir yang masih terbuka — juga saat batal, supaya
         # transkrip parsial rapi sampai titik henti.
         for line in merger.finish():
-            writer.write_line(line)
+            chrono.line(line)
             lines.append(line)
+        chrono.flush()   # penanda loop di ekor file (tak ada baris sesudahnya)
 
         # --- Penghalusan WORD-LEVEL (brief 27) ---
         # Streaming di atas menulis level-SEGMEN (ketahanan interupsi). Bila run
@@ -228,7 +262,8 @@ def transcribe_file(audio_path: str, config, sink: ProgressSink,
                 refined = refine()
             if refined:
                 r_lines, r_loop_times = _remerge_wordlevel(
-                    refined, turns, config, writer, detector_cls=LoopDetector)
+                    refined, turns, config, writer, detector_cls=LoopDetector,
+                    island_max_s=island_max_s)
                 lines = r_lines
                 loop_times = r_loop_times
         # Selesai normal ATAU batal rapi: commit (.part -> .txt) atomik.
@@ -254,39 +289,65 @@ def transcribe_file(audio_path: str, config, sink: ProgressSink,
                   loop_detected=bool(loop_times), loop_times=loop_times)
 
 
-def _remerge_wordlevel(refined, turns, config, writer, detector_cls):
+def _remerge_wordlevel(refined, turns, config, writer, detector_cls,
+                       island_max_s=None):
     """Re-merge segmen word-level jadi output final & tulis ULANG .part (brief 27).
 
     Dipakai hanya pada selesai-normal. Menjalankan merge + loop-detector yang SAMA
     seperti jalur streaming, tapi atas segmen ber-word-timestamp -> atribusi speaker
     per-kalimat lebih presisi. Teks sama (decode identik) jadi peringatan loop juga
     sama. Kembalikan (lines, loop_times)."""
-    merger = StreamingMerger(
-        turns, island_max_s=getattr(config, "merge_island_max_s", 4.0))
+    if island_max_s is None:      # pemanggil lama (skrip diagnostik) -> knob sherpa
+        island_max_s = getattr(config, "merge_island_max_s", 4.0)
+    merger = StreamingMerger(turns, island_max_s=island_max_s)
     detector = detector_cls()
+
+    # Pangkas loop LINTAS-segmen dulu (bug user 2026-08-10): whisper.cpp memuntahkan
+    # loop sebagai segmen-segmen ~1 detik, jadi pemangkas per-segmen tak melihatnya
+    # dan penekan lintas-segmen baru menyala setelah 5-6 salinan lolos. Jalur akhir
+    # ini melihat SELURUH file sekaligus, jadi di sinilah tempat yang benar.
+    refined, stream_trims = collapse_stream_repeats(refined)
+    pending_trims = list(stream_trims)
+
     # Kumpulkan output berurutan (note & line) dulu, baru tulis ulang .part sekali.
-    items = []            # ("note", str) | ("line", MergedLine)
+    items = []            # ("note", (waktu, str)) | ("line", MergedLine)
     loop_times: list[float] = []
+
+    def _flush_trim_notes(until: float) -> None:
+        """Penanda untuk pangkas lintas-segmen, disisipkan pada urutan waktunya."""
+        while pending_trims and pending_trims[0] <= until:
+            t = pending_trims.pop(0)
+            items.append(("note", (t, f"[{format_timestamp(t)}] {_LOOP_NOTE}")))
+            loop_times.append(t)
+
     for seg in refined:
+        _flush_trim_notes(seg.start)
         seg2, note = _guard_segment(detector, seg)
+        # Jangan menandai dua kali wilayah yang sama: kalau pangkas lintas-segmen
+        # baru saja menandai di dekat sini, penanda per-segmen ditekan.
+        if note and loop_times and abs(seg.start - loop_times[-1]) <= 60:
+            note = None
         if note:
             ts = format_timestamp(seg.start)
-            items.append(("note", f"[{ts}] {note}"))
+            items.append(("note", (seg.start, f"[{ts}] {note}")))
             loop_times.append(seg.start)
         if seg2 is not None:
             for line in merger.feed(seg2):
                 items.append(("line", line))
+    _flush_trim_notes(float("inf"))   # pangkas di ekor file
     for line in merger.finish():
         items.append(("line", line))
 
     writer.reset()        # buang .part streaming, tulis ulang versi word-level
+    chrono = _ChronoWriter(writer)
     lines = []
     for kind, payload in items:
         if kind == "note":
-            writer.write_note(payload)
+            chrono.note(payload[0], payload[1])
         else:
-            writer.write_line(payload)
+            chrono.line(payload)
             lines.append(payload)
+    chrono.flush()
     return lines, loop_times
 
 

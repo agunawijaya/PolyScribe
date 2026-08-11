@@ -65,6 +65,10 @@ cuma binary/dependency yang dibundel per build profile.
   tak ada — tak pernah crash. Dipilih lewat `config.diarizer_choice`, dropdown GUI,
   atau `--diarizer`. Speaker count SELALU auto. Model pyannote diunduh **sekali saat
   build** (token HF); **runtime tetap offline, tanpa akun** (`HF_HUB_OFFLINE`).
+  Knob cleanup/merge (`diar_min_turn`, `diar_min_speaker_frac`, `merge_island_max_s`)
+  adalah **tuning sherpa** dan punya PRESET SENDIRI untuk pyannote (semua 0, brief 50)
+  lewat `Config.tuning_for_diarizer()` — dipilih dari diarizer yang benar-benar
+  dipakai (sesudah fallback), bukan yang diminta.
   Knob khusus sherpa (lebur-centroid, ITD-split, spatial) **tidak dipakai pyannote** —
   terbukti lewat `.txt` byte-identik ON vs OFF (brief 37).
 - Pemilihan backend/device lewat DETEKSI RUNTIME, bukan hard-code vendor.
@@ -156,20 +160,32 @@ Setup tambahan untuk mesin ber-GPU NVIDIA (brief NVIDIA_00/01/02):
 Reproduksi di mesin lain (pakai versi terkunci):
     & $py -m pip install -r requirements.lock.txt
 
-Unit test (83 hijau; jalankan semua 11 file di tests\):
+Unit test (96 hijau; jalankan semua 11 file di tests\):
     & Get-ChildItem tests\test_*.py | ForEach-Object { & $py $_.FullName }
     # atau per file, mis.:  & $py tests\test_merge.py ; & $py tests\test_diarizer_toggle.py
 
 ## Config default v1 (verbatim — nilai efektif di config.py)
 
     diarizer_choice        = "pyannote"   # Akurat (default) | "sherpa" = Cepat
-    whispercpp_max_context = 8            # anti-loop; JANGAN dinaikkan
+    whispercpp_max_context = 24           # brief 51: naik dari 8. Tanda baca 8,2->13,1
+                                          # & loop 2->0 di rekaman 43 mnt. Regime
+                                          # >45 mnt BELUM teruji (file uji hilang).
     primary_language       = "en"         # "auto" untuk file multibahasa
+    asr_initial_prompt     = ""           # kosong = pakai contoh tanda baca per bahasa
+    asr_carry_initial_prompt = True       # ulangi contoh itu di SETIAP jendela
+    # Contoh tanda baca default HANYA untuk "en" (ASR_PUNCTUATION_PROMPTS). Brief 51:
+    # prompt Inggris pada audio Arab bikin whisper MENERJEMAHKAN; prompt Arab bikin
+    # output runtuh. Jangan menambah bahasa tanpa mengukur di fixture bahasa itu.
     allow_vulkan           = True
     use_word_refine        = True
     use_speaker_merge      = True         # hanya berlaku untuk sherpa
     use_itd_split          = True         # hanya berlaku untuk sherpa
     use_spatial_cues       = False        # terbukti tak bermanfaat
+
+    # knob cleanup/merge: dipilih per-diarizer (Config.tuning_for_diarizer)
+    diar_min_turn          = 0.5   / pyannote: 0.0    # preset Akurat = tanpa perataan
+    diar_min_speaker_frac  = 0.010 / pyannote: 0.0
+    merge_island_max_s     = 4.0   / pyannote: 0.0
 
 ## Isu terbuka v1 (jujur)
 1. **pyannote selalu ~5 speaker di file panjang** — koheren sejauh diuji, tapi BELUM
