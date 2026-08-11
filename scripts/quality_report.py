@@ -42,7 +42,12 @@ from pathlib import Path
 LINE = re.compile(r"\[(\d+):(\d+):(\d+)\]\s+(SPEAKER_\d+|SPEAKER_\?\?):‎?\s*(.*)")
 NOTE = re.compile(r"\[(\d+):(\d+):(\d+)\]\s+===")
 
-PUNCT_GATE = re.compile(r"[.?!,;:]")     # definisi gerbang brief 39
+# Definisi gerbang brief 39, DIPERLUAS ke tanda baca Arab (brief 53). Versi Latin
+# saja melaporkan 0,0 untuk transkrip Arab yang sebenarnya punya 8 tanda baca —
+# kesalahan yang persis sama sudah pernah diakui Tester di brief 39. Alat ukur yang
+# buta terhadap salah satu bahasa produk = alat ukur yang berbohong.
+#   ، U+060C koma   ؛ U+061B titik koma   ؟ U+061F tanya   ۔ U+06D4 titik
+PUNCT_GATE = re.compile(r"[.?!,;:،؛؟۔]")
 BLOCK_SECONDS = 60                       # ambang "blok raksasa"
 BIN_MINUTES = 5
 

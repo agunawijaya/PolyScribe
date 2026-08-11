@@ -14,7 +14,18 @@ from .diarization.base import SpeakerTurn
 
 
 # Kata yang mengakhiri kalimat: berakhir . ! ? (boleh diikuti kutip/kurung).
-_SENT_END = re.compile(r'[.!?]["\'\)\]]*$')
+#
+# HARUS mencakup tanda baca ARAB (brief 53). Bug yang ditemukan 2026-08-11: pola
+# lama hanya `[.!?]` — Latin. Transkrip Arab nyata (fixture 120 dtk) keluar dengan
+# `،` 7x dan `؟` 1x dan NOL titik Latin, jadi merger tak pernah menemukan SATU PUN
+# batas kalimat -> tak bisa memecah giliran sama sekali -> 120 detik jadi 3 baris.
+# Ini akar berbeda dari "tanda baca runtuh" (brief 51): di sini tanda bacanya ADA,
+# kita yang buta terhadapnya. Produk menjanjikan Inggris/Arab/Indonesia, jadi
+# kebutaan Latin di titik pemotongan giliran = cacat, bukan keterbatasan.
+#   ؟ U+061F  tanda tanya Arab
+#   ۔ U+06D4  titik Arab/Urdu
+#   ! ? .     dipakai juga di teks Arab modern
+_SENT_END = re.compile(r'[.!?؟۔]["\'\)\]]*$')
 
 
 @dataclass

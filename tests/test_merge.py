@@ -216,6 +216,33 @@ def test_sentence_cap_no_effect_on_short_sentence():
     assert out[1].text == "hi back."
 
 
+def test_arabic_sentence_end_recognised():
+    """Brief 53 — bug nyata: `_SENT_END` dulu hanya `[.!?]` (Latin). Transkrip Arab
+    asli (fixture 120 dtk) keluar dengan `،` 7x dan `؟` 1x dan NOL titik Latin, jadi
+    merger tak menemukan SATU PUN batas kalimat -> tak bisa memecah giliran ->
+    120 detik jadi 3 baris. Di sini tanda bacanya ADA; kita yang buta."""
+    from polyscribe.merge import _SENT_END
+    for mark in ("؟", "۔", ".", "!", "?"):
+        assert _SENT_END.search(f"كلمة{mark}"), f"tanda akhir kalimat {mark!r} tak dikenali"
+    # Koma Arab BUKAN akhir kalimat — memecah di koma akan over-split.
+    assert not _SENT_END.search("كلمة،")
+    assert not _SENT_END.search("كلمة؛")
+
+
+def test_arabic_turn_split_on_question_mark():
+    """Dua pembicara, teks Arab, batas kalimat hanya `؟` — harus terpisah."""
+    turns = [SpeakerTurn(0.0, 2.0, "SPEAKER_00"), SpeakerTurn(2.0, 4.0, "SPEAKER_01")]
+    segs = [
+        _seg(0.0, 1.8, "هل هذا صحيح؟",
+             [(0.0, 0.8, "هل"), (0.9, 1.3, "هذا"), (1.4, 1.8, "صحيح؟")]),
+        _seg(2.1, 3.9, "نعم، هذا صحيح۔",
+             [(2.1, 2.6, "نعم،"), (2.7, 3.2, "هذا"), (3.3, 3.9, "صحيح۔")]),
+    ]
+    out = _stream(turns, segs)
+    assert len(out) == 2, f"giliran Arab tak terpisah: {[(l.speaker, l.text) for l in out]}"
+    assert out[0].speaker != out[1].speaker
+
+
 def _monologue_segments(n_sentences=12, words_per=15):
     """Satu orang bicara panjang tanpa jeda — kasus yang memicu batas keterbacaan."""
     segs, t = [], 0.0
