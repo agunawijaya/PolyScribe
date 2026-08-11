@@ -214,13 +214,22 @@ Unit test (100 hijau; jalankan semua 11 file di tests\):
    ada sekarang cuma 43 menit; file Std-12 sudah tak ada di mesin ini. Kalau muncul
    rekaman panjang: jalankan `prompts\scripts\tester51_mc_loopgate.py` (ganti FIXTURE)
    SEBELUM percaya. Gejala pertama kalau salah: banyak penanda PERINGATAN loop.
-2. **Arab masih rawan blok raksasa.** Contoh tanda baca hanya untuk `"en"` — prompt
-   Inggris membuat whisper MENERJEMAHKAN audio Arab, prompt Arab membuat output
-   runtuh (dua-duanya terukur di fixture 90 dtk). Fixture Arab tanpa prompt = 5,3
-   tanda baca/100 kata, di bawah gerbang 15 → merge kemungkinan besar melebur giliran
-   seperti sebelum perbaikan. BELUM diuji di rekaman Arab panjang (tak ada).
-3. **Indonesia belum pernah diukur sama sekali** — tak ada fixture. `"id"` tak dapat
-   prompt. Status kualitasnya tidak diketahui, bukan "baik".
+2. **Arab: batas giliran sudah BENAR, cakupan ASR-nya yang lemah** (brief 53).
+   Diperbaiki: `_SENT_END` dulu hanya `[.!?]` Latin sehingga teks Arab (yang memakai
+   `؟` & `،`) tak punya batas kalimat sama sekali → 120 dtk jadi 3 baris. Kini
+   `[.!?؟۔]`. TAPI sisa kelemahannya di ASR & tak bisa ditambal dari merge: whisper
+   cuma menghasilkan ~35 kata/menit di audio Arab dan jarang memberi akhir kalimat.
+   Contoh tanda baca untuk Arab TIDAK dipakai — 5 varian × 2 fixture, tak ada yang
+   menang di keduanya (ar-pendek: 18,7 di fixture A tapi 6,7 di B). Jangan
+   menambahkannya tanpa fixture Arab ketiga yang bersih. BELUM diuji di rekaman Arab
+   panjang (tak ada asetnya). Klaim yang sah: "Arab jalan & tak salah struktur",
+   BUKAN "setara Inggris".
+3. **Indonesia: pipa-nya teruji, KUALITASNYA belum pernah diukur** — tak ada audio
+   Indonesia di repo. Yang sudah dijamin tes: pemetaan bahasa GUI/CLI → `-l id`, dan
+   `_SENT_END` memang mencakup tanda baca Latin yang dipakai bahasa Indonesia. Yang
+   TIDAK diketahui: cakupan kata & kepadatan tanda baca ASR-nya. Butuh satu rekaman
+   Indonesia (10 menit cukup) untuk menutupnya — sampai itu ada, jangan mengklaim
+   kualitas Indonesia.
 
 **Diketahui & diterima:**
 4. **pyannote ~5 speaker di file panjang** — koheren sejauh diuji, BELUM diuji pada
