@@ -11,9 +11,14 @@ antar-agen lihat [CLAUDE.md](../CLAUDE.md).
 
 ## 1. TL;DR
 
-- **Satu basis kode** untuk semua target hardware. Perbedaan hardware dijawab
-  di **runtime** (deteksi) dan di **build profile** (native binary yang
-  dibundel), **bukan** dengan fork.
+- **Tiga kelas hardware**, dan aplikasi wajib **jalan** di ketiganya: NVIDIA
+  (CUDA, **acuan kualitas**), AMD (Vulkan iGPU / CPU), dan CPU-only. **Kualitas,
+  kecepatan, dan tumpukan backend BOLEH berbeda antar kelas** — itu justru yang
+  diinginkan (keputusan user 2026-08-11). Satu basis kode tetap dipertahankan
+  sebagai praktik (perbedaan dijawab di **runtime** + **build profile**, bukan
+  fork), tapi ia **bukan** alasan untuk menolak tumpukan yang hanya jalan di satu
+  vendor: backend CUDA-only sah ditambahkan untuk profil NVIDIA selama profil lain
+  tetap jalan. Lihat catatan koreksi sejarah di [CLAUDE.md](../CLAUDE.md).
 - **Dua titik pluggable**: `AsrBackend` untuk transkripsi, `Diarizer` untuk
   pelabelan pembicara. Interface tunggal, implementasi bisa ditukar tanpa
   membongkar pipeline.
@@ -21,6 +26,11 @@ antar-agen lihat [CLAUDE.md](../CLAUDE.md).
   tidak menyentuh jaringan.
 - **Prioritas hardware**: CUDA (NVIDIA) → Vulkan (iGPU AMD Radeon) → CPU int8
   (universal fallback yang tak pernah gagal karena hardware).
+- **Profil NVIDIA = acuan kualitas.** Beberapa cacat yang dikejar lama di jalur
+  AMD (tanda baca runtuh, loop mengunci diri) adalah artefak `whisper.cpp` yang
+  mewariskan transkrip sebagai konteks; faster-whisper punya
+  `prompt_reset_on_temperature` sehingga kelas bug itu tak berlaku di sana. Jangan
+  menyeret kompromi khusus-AMD (mis. `whispercpp_max_context`) ke profil NVIDIA.
 
 ---
 
@@ -241,7 +251,12 @@ Dua lapis pengaman:
 
 ---
 
-## 6. Multi-hardware, satu basis kode
+## 6. Multi-hardware: satu basis kode, kualitas boleh berbeda
+
+> Diagram di bawah menunjukkan mekanismenya (build profile + deteksi runtime).
+> Yang TIDAK ditunjukkan, dan perlu diingat: sejak 2026-08-11 tiap profil boleh
+> memakai tumpukan backend yang berbeda — profil NVIDIA boleh menambah backend
+> CUDA-only selama profil lain tetap jalan. Lihat NFR-2 di PRODUCT_SPEC.md.
 
 ```mermaid
 flowchart LR
@@ -279,6 +294,11 @@ flowchart LR
 **Paket pip di `requirements.txt` IDENTIK di kedua profil.** Yang beda hanya
 native lib / model / paket-CUDA yang dibundel di atasnya. Ini yang memastikan
 "satu basis kode".
+
+Catatan (2026-08-11): keidentikan ini adalah *keadaan sekarang*, bukan aturan.
+Profil NVIDIA boleh menumbuhkan dependency-nya sendiri (mis. tumpukan CUDA-only)
+selama profil AMD & CPU-only tetap jalan — pola yang sama seperti
+`requirements-cuda.txt` dan `requirements-pyannote.txt` yang sudah terpisah.
 
 ### Windows CUDA DLL bootstrap
 

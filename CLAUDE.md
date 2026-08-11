@@ -18,13 +18,29 @@ NVIDIA. Jalan dari venv saja sudah cukup untuk v1.
 ## Batasan keras (jangan dilanggar)
 - Offline penuh. Tidak ada panggilan cloud. Tidak ada login / token pada jalur
   utama (plan A).
-- Target hardware ADA DUA — aplikasi WAJIB jalan di keduanya lewat SATU kode sumber:
-  (1) Laptop AMD Ryzen AI 7 350 — iGPU Radeon 860M (Vulkan) / CPU. Tidak ada CUDA.
-  (2) Laptop NVIDIA — pakai CUDA.
-  Jangan hard-code satu vendor. Backend & device dipilih lewat DETEKSI RUNTIME
-  (mis. faster-whisper device='auto'). Perbedaan antar-mesin diwujudkan sebagai
-  build profile per-hardware (binary/dependency yang dibundel beda), BUKAN fork
-  kode sumber. Lihat bagian Arsitektur.
+- Target hardware = TIGA KELAS mesin. Aplikasi WAJIB **jalan** di ketiganya:
+  (1) NVIDIA (CUDA) — **acuan kualitas**, mesin terkuat user;
+  (2) AMD Ryzen AI 7 350 — iGPU Radeon 860M (Vulkan) / CPU. Tidak ada CUDA;
+  (3) Laptop biasa CPU-only.
+  **Kualitas, kecepatan, dan TUMPUKAN backend BOLEH berbeda antar kelas** — user
+  secara eksplisit mengizinkannya demi hasil terbaik per mesin (2026-08-11).
+  Artinya: tumpukan CUDA-only (mis. WhisperX, NeMo/Sortformer) SAH dipakai di
+  profil NVIDIA. Yang tetap wajib: profil lain tetap jalan, tak ada hard-code
+  vendor, pemilihan lewat DETEKSI RUNTIME + build profile.
+
+  KOREKSI SEJARAH — jangan hidupkan lagi batasan lama. Sampai 2026-08-11 dokumen
+  ini menulis "Target hardware ADA DUA ... WAJIB jalan lewat SATU kode sumber".
+  Itu bukan kata user: jejaknya di `prompts\02_pm_to_architect_revision.md` §2,
+  di mana agen ber-peran PM MENAFSIRKAN maksud user ("«Fork» yang user maksud
+  diwujudkan di level BUILD, bukan source") lalu menuliskannya sebagai requirement.
+  Tafsiran itu menyebar ke ARCHITECTURE.md & PRODUCT_SPEC.md, naik pangkat jadi
+  "batasan keras", dan membuat agen berikutnya membuang opsi CUDA-only tanpa pernah
+  menanyakannya. Tiga dokumen yang saling konsisten BUKAN verifikasi — itu satu
+  klaim yang disalin tiga kali. Telusuri batasan ke sumbernya sebelum mematuhinya.
+
+  Catatan teknis: kualitas terbaik per mesin TIDAK menuntut fork kode sumber —
+  `AsrBackend`/`Diarizer` yang pluggable memang untuk itu. Satu basis kode tetap
+  praktik yang baik; yang dicabut adalah keharusan KUALITAS/BACKEND yang seragam.
 - Diarization plan A = sherpa-onnx. Modulnya HARUS tetap bisa ditukar (pluggable)
   supaya plan B (pyannote) bisa dipasang tanpa membongkar aplikasi.
 - Jumlah pembicara selalu auto-detect. Tidak ada input jumlah pembicara manual.
@@ -50,8 +66,9 @@ diarization) -> merge by overlap waktu -> tulis .txt di sebelah audio. Dua titik
 dibuat pluggable lewat interface: ASR (AsrBackend) dan diarization (Diarizer).
 Ganti backend = ganti satu kelas; pipeline tidak berubah.
 
-**Runtime & multi-hardware.** Satu kode sumber jalan di dua laptop; yang beda
-cuma binary/dependency yang dibundel per build profile.
+**Runtime & multi-hardware.** Satu kode sumber jalan di tiga kelas mesin (NVIDIA
+/ AMD-Vulkan / CPU-only); yang beda: binary & dependency yang dibundel per build
+profile, DAN — sejak 2026-08-11 — boleh juga tumpukan backend-nya (lihat Batasan).
 - ASR backend A = faster-whisper large-v3. Dengan device='auto' dia otomatis
   pakai CUDA di laptop NVIDIA (cepat) dan CPU int8 di laptop AMD (baseline yang
   selalu jalan). Satu backend menutup dua mesin.

@@ -24,11 +24,13 @@ tanpa membongkar aplikasi:
 - **ASR (`AsrBackend`)** — mesin transkripsi.
 - **Diarization (`Diarizer`)** — mesin pemisah pembicara.
 
-## Multi-hardware, satu kode sumber
+## Multi-hardware: jalan di mana-mana, tidak harus seragam
 
-Aplikasi wajib jalan di dua jenis laptop lewat **satu kode sumber**; yang berbeda
-hanya binary/dependency yang dibundel. Backend dan device dipilih lewat **deteksi
-runtime**, bukan di-hard-code per vendor:
+Aplikasi wajib **jalan** di tiga kelas mesin — NVIDIA (CUDA, acuan kualitas),
+AMD (iGPU Radeon lewat Vulkan), dan CPU-only — lewat **satu kode sumber**.
+Kualitas, kecepatan, dan tumpukan backend **boleh berbeda antar kelas**; memaksa
+keseragaman justru menurunkan mesin kuat ke batas mesin terlemah. Backend dan
+device dipilih lewat **deteksi runtime**, bukan di-hard-code per vendor:
 
 | Prioritas | Hardware | Jalur |
 |-----------|----------|-------|

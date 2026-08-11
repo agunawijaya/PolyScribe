@@ -150,13 +150,23 @@ itu tidak ada akses jaringan.
 *Rasionalisasi:* privacy = raison d'être; jaminan ini yang membedakan
 PolyScribe dari solusi cloud.
 
-**NFR-2: Multi-hardware, satu basis kode.** Aplikasi wajib jalan di dua
-platform target (Windows AMD Radeon iGPU + Windows NVIDIA GPU) lewat **satu**
-kode sumber, dengan pemilihan backend via **deteksi runtime**, bukan hardcode
-per-vendor.
+**NFR-2: Multi-hardware — wajib JALAN di mana-mana, tidak wajib SERAGAM.**
+Aplikasi wajib jalan di tiga kelas mesin: Windows NVIDIA (CUDA, **acuan
+kualitas**), Windows AMD Radeon iGPU (Vulkan/CPU), dan CPU-only. Pemilihan
+backend lewat **deteksi runtime**, bukan hardcode per-vendor. **Kualitas,
+kecepatan, dan tumpukan backend BOLEH berbeda antar kelas**, dan tumpukan yang
+hanya jalan di satu vendor (mis. CUDA-only) sah dipakai di profil vendor itu
+selama kelas lain tetap jalan.
 
-*Rasionalisasi:* menghindari drift kode antar platform. Perubahan di satu sisi
-otomatis dapat manfaatnya di sisi lain.
+*Rasionalisasi:* user punya beberapa laptop dan secara eksplisit mengizinkan
+solusi berbeda per mesin demi hasil terbaik (2026-08-11). Satu basis kode tetap
+dipertahankan untuk mencegah drift, tapi keseragaman KUALITAS bukan tujuan —
+memaksakannya justru menurunkan mesin kuat ke batas mesin terlemah.
+
+*Revisi:* NFR ini sebelumnya berbunyi "wajib jalan di dua platform target lewat
+satu kode sumber" dan dibaca sebagai larangan memakai tumpukan CUDA-only. Itu
+hasil penafsiran agen atas maksud user, bukan permintaan user — lihat catatan
+koreksi sejarah di CLAUDE.md.
 
 **NFR-3: Tidak pernah crash karena hardware/model absen.** Kalau CUDA tidak
 ada → fallback CPU. Kalau Vulkan tidak ada → fallback CPU. Kalau pyannote tidak
@@ -224,8 +234,8 @@ proses terpisah supaya GUI tetap hidup.
   fallback).
 - Loop guard, atomic file write, decoding via `imageio-ffmpeg`.
 - Runtime detection untuk pemilihan backend.
-- Support 2 platform target: Windows AMD (Radeon iGPU) + Windows NVIDIA
-  (dGPU) — satu basis kode.
+- Support 3 kelas hardware: Windows NVIDIA (dGPU, acuan kualitas) + Windows AMD
+  (Radeon iGPU) + CPU-only. Tumpukan boleh berbeda per kelas (NFR-2).
 - Bootstrap Windows CUDA DLL (helper di `polyscribe/__init__.py`).
 - Auto-fallback yang aman di setiap titik kegagalan yang bisa diprediksi.
 

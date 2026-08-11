@@ -105,11 +105,17 @@ variabel jelas, tidak over-engineering.
 5. Handle absence gracefully — kalau library backend tidak terpasang, jangan
    crash saat import; beri pesan ramah saat user coba pakai.
 
-**Perubahan yang menyentuh dua platform target:**
+**Perubahan yang menyentuh lebih dari satu kelas hardware:**
 
-Verifikasi berjalan di kedua platform sebisa mungkin (Windows AMD Radeon iGPU +
-Windows NVIDIA dGPU). Kalau tidak punya akses ke salah satunya, sebutkan di PR
-description supaya reviewer bisa test.
+Ada tiga kelas target: Windows NVIDIA dGPU (acuan kualitas), Windows AMD Radeon
+iGPU, dan CPU-only. Verifikasi di kelas yang terdampak sebisa mungkin; kalau tak
+punya aksesnya, sebutkan di PR description supaya reviewer bisa test.
+
+Kualitas & tumpukan backend **boleh berbeda** antar kelas — backend CUDA-only sah
+untuk profil NVIDIA selama kelas lain tetap jalan. Yang TIDAK boleh: menurunkan
+kualitas mesin kuat demi menyamakannya dengan mesin lemah, dan menyeret kompromi
+khusus satu kelas (mis. `whispercpp_max_context` yang milik jalur Vulkan) menjadi
+default global.
 
 Backend & device dipilih lewat **deteksi runtime**, bukan hard-code vendor.
 Jangan menambah cek `if platform == 'nvidia'`; gunakan
