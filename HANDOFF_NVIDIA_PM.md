@@ -22,13 +22,22 @@ dideteksi otomatis (tidak ada input manual).
 
 ## Arsitektur yang kamu warisi
 - SATU basis kode, deteksi hardware saat runtime (polyscribe/hardware.py memilih
-  CUDA -> Vulkan -> CPU). BUKAN fork. Beda mesin = build profile, bukan cabang kode.
+  CUDA -> Vulkan -> CPU). Beda mesin = build profile, bukan cabang kode.
+- **PENTING (koreksi 2026-08-11): "satu basis kode" BUKAN berarti kualitas &
+  backend harus seragam.** User punya beberapa laptop dan secara eksplisit
+  mengizinkan solusi BERBEDA per mesin demi hasil terbaik. **Laptop NVIDIA =
+  ACUAN KUALITAS.** Tumpukan yang hanya jalan di CUDA (mis. WhisperX, NeMo/
+  Sortformer) SAH kamu pakai di sini, selama profil AMD & CPU-only tetap jalan.
+  Batasan lama yang berbunyi "wajib jalan di dua laptop lewat satu kode sumber"
+  pernah dibaca sebagai larangan itu — itu keliru, lihat catatan koreksi sejarah
+  di CLAUDE.md. Jangan menghidupkannya kembali.
 - Transkripsi: faster-whisper large-v3. Dengan device='auto' ia OTOMATIS pakai CUDA
   di laptop NVIDIA — inilah keuntunganmu, jauh lebih cepat dari AMD. (Jalur
   whisper.cpp/Vulkan itu KHUSUS AMD; TIDAK relevan & TIDAK dibutuhkan di NVIDIA.)
 - Diarization pluggable: "Akurat" = pyannote (default), "Cepat" = sherpa-onnx.
   Di NVIDIA, pyannote bisa jalan di CUDA -> jauh lebih cepat dari CPU.
-- Pengaman sudah ada: loopguard.py (anti-loop halusinasi, pakai --max-context 8),
+- Pengaman sudah ada: loopguard.py (anti-loop halusinasi; memangkas pengulangan
+  lintas-segmen & SELALU menandainya di .txt),
   tulis-inkremental (.txt ditulis berjalan, bukan hanya di akhir), fallback otomatis
   ke "Cepat" kalau "Akurat" gagal dimuat.
 - GUI: customtkinter — progress hidup, dropdown bahasa (Inggris/Bahasa Indonesia/
@@ -47,12 +56,36 @@ dideteksi otomatis (tidak ada input manual).
    NVIDIA TIDAK butuh model GGML Vulkan.
 4. Validasi jalur CUDA di rekaman rapat ASLI, FILE PENUH, dijalankan TESTER, dengan
    path artefak yang bisa kamu buka & ukur sendiri.
-5. Jaga SATU basis kode. Perubahan di sini di-push balik supaya laptop AMD bisa pull.
-   Jangan fork.
+5. Jaga SATU basis kode & push balik supaya laptop AMD bisa pull — tapi JANGAN
+   menyamakan kualitas ke bawah. Kamu boleh menambah backend CUDA-only lewat
+   interface pluggable (`AsrBackend` / `Diarizer`); yang dilarang adalah mem-fork
+   source dan menyeret kompromi khusus satu mesin jadi default global.
+
+6. **Jangan warisi kompromi jalur AMD.** `whispercpp_max_context` dan initial
+   prompt tanda baca (`ASR_PUNCTUATION_PROMPTS`) itu obat untuk penyakit
+   whisper.cpp: ia mewariskan transkrip sebelumnya sebagai konteks, sehingga sekali
+   keluar dari mode bertanda-baca ia MENGUNCI DIRI (tanda baca runtuh -> merge
+   gagal memotong giliran -> blok raksasa berisi banyak pembicara). faster-whisper
+   punya `prompt_reset_on_temperature`, jadi kelas bug itu kemungkinan besar TIDAK
+   ADA di sini. **Ukur dulu** sebelum menambal apa pun: kalau memang tak ada,
+   naikkan langsung ke pertanyaan yang lebih berguna (pyannote sudah cukup, atau
+   Sortformer memang lebih baik?).
+
+7. **Ukur dengan alat yang SAMA seperti lini AMD** supaya angkanya bisa
+   dibandingkan: `python scripts\quality_report.py <hasil.txt>` (ikut repo). Ia
+   melaporkan gerbang tanda baca (ambang >=15/100 kata), profil tanda baca per 5
+   menit (keruntuhan itu per-WILAYAH, gampang tersembunyi di rata-rata), blok >=60
+   detik, dan penanda loop. Bandingkan beberapa file sekaligus dengan memberi
+   banyak path.
 
 ## Cara kerja tim (WAJIB, tegakkan)
 - Komunikasi lewat file: brief di prompts/, hasil di prompts/results/, script di
   prompts/scripts/.
+- **AWAS: `prompts/` ada di .gitignore — isinya TIDAK ikut `git pull`/`push`.**
+  Jadi brief, laporan, dan skrip diagnostik lini AMD TIDAK ada di mesin ini, dan
+  punyamu tak akan sampai ke sana. Apa pun yang harus dipakai lintas-mesin
+  (alat ukur, skrip gerbang) taruh di `scripts/` yang ter-track — contohnya
+  `scripts/quality_report.py`.
 - Rantai laporan naik satu tingkat: Programmer/Tester -> Architect (yang memutuskan
   teknis) -> PM. PM TIDAK membaca laporan engineer langsung; PM bertanya lewat
   Architect.
