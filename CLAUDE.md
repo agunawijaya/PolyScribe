@@ -177,7 +177,7 @@ Setup tambahan untuk mesin ber-GPU NVIDIA (brief NVIDIA_00/01/02):
 Reproduksi di mesin lain (pakai versi terkunci):
     & $py -m pip install -r requirements.lock.txt
 
-Unit test (96 hijau; jalankan semua 11 file di tests\):
+Unit test (100 hijau; jalankan semua 11 file di tests\):
     & Get-ChildItem tests\test_*.py | ForEach-Object { & $py $_.FullName }
     # atau per file, mis.:  & $py tests\test_merge.py ; & $py tests\test_diarizer_toggle.py
 
@@ -198,6 +198,8 @@ Unit test (96 hijau; jalankan semua 11 file di tests\):
     use_speaker_merge      = True         # hanya berlaku untuk sherpa
     use_itd_split          = True         # hanya berlaku untuk sherpa
     use_spatial_cues       = False        # terbukti tak bermanfaat
+    merge_block_max_words  = 120          # batas KETERBACAAN: giliran panjang dipecah
+                                          # di batas kalimat, speaker SAMA (0 = mati)
 
     # knob cleanup/merge: dipilih per-diarizer (Config.tuning_for_diarizer)
     diar_min_turn          = 0.5   / pyannote: 0.0    # preset Akurat = tanpa perataan

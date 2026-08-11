@@ -209,7 +209,8 @@ def transcribe_file(audio_path: str, config, sink: ProgressSink,
                       speakers=[], cancelled=True)
 
     # --- ASR di-stream: tiap segmen langsung digabung & ditulis inkremental ---
-    merger = StreamingMerger(turns, island_max_s=island_max_s)
+    merger = StreamingMerger(turns, island_max_s=island_max_s,
+                             block_max_words=getattr(config, 'merge_block_max_words', 120))
     writer = IncrementalTxtWriter(audio_path)
     chrono = _ChronoWriter(writer)   # penanda loop ditulis pada urutan waktu
     detector = LoopDetector()   # jaring pengaman: tandai loop halusinasi (brief 18)
@@ -299,7 +300,8 @@ def _remerge_wordlevel(refined, turns, config, writer, detector_cls,
     sama. Kembalikan (lines, loop_times)."""
     if island_max_s is None:      # pemanggil lama (skrip diagnostik) -> knob sherpa
         island_max_s = getattr(config, "merge_island_max_s", 4.0)
-    merger = StreamingMerger(turns, island_max_s=island_max_s)
+    merger = StreamingMerger(turns, island_max_s=island_max_s,
+                             block_max_words=getattr(config, 'merge_block_max_words', 120))
     detector = detector_cls()
 
     # Pangkas loop LINTAS-segmen dulu (bug user 2026-08-10): whisper.cpp memuntahkan

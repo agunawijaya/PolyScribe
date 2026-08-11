@@ -148,6 +148,16 @@ class Config:
     # tanpa menyentuh alternasi sah A-B-A-B (#2).
     merge_island_max_s: float = 4.0
 
+    # Batas KETERBACAAN satu baris .txt (kata). Giliran bicara yang lebih panjang
+    # dari ini dipecah DI BATAS KALIMAT jadi beberapa baris ber-speaker SAMA — teks
+    # dan label tak berubah, tiap baris cuma dapat timestamp sendiri.
+    # Kenapa perlu (brief 52): sesudah tanda baca beres, sisa blok >=60 detik ternyata
+    # MONOLOG asli (diarization: dominan 91-100%), jadi memecahnya per-speaker akan
+    # salah. Yang tersisa murni soal baca: satu baris pernah 266 kata. 120 dipilih
+    # supaya hanya blok yang benar-benar raksasa tersentuh (median baris = 31 kata).
+    # 0 = matikan (kembali ke perilaku lama).
+    merge_block_max_words: int = 120
+
     # whisper.cpp --max-context (Vulkan). P0 (brief 18) sempat menyetel 0 untuk
     # membunuh loop halusinasi — TAPI itu juga membunuh tanda baca & konsistensi
     # kata (regresi brief 22): tanpa konteks, whisper tak menaruh titik/koma, dan

@@ -216,6 +216,67 @@ def test_sentence_cap_no_effect_on_short_sentence():
     assert out[1].text == "hi back."
 
 
+def _monologue_segments(n_sentences=12, words_per=15):
+    """Satu orang bicara panjang tanpa jeda — kasus yang memicu batas keterbacaan."""
+    segs, t = [], 0.0
+    for i in range(n_sentences):
+        words = [f"kata{i}x{j}" for j in range(words_per - 1)] + [f"akhir{i}."]
+        ws = [Word(t + k * 0.4, t + k * 0.4 + 0.35, w) for k, w in enumerate(words)]
+        segs.append(AsrSegment(start=t, end=ws[-1].end, text=" ".join(words),
+                               language="en", words=ws))
+        t = ws[-1].end + 0.1
+    return segs
+
+
+def test_long_monologue_split_for_readability():
+    """Brief 52: giliran panjang TETAP milik satu orang (memecah per-speaker akan
+    salah — diarization membuktikan itu monolog asli), tapi 266 kata dalam satu
+    baris tak terbaca. Jadi dipecah di BATAS KALIMAT, speaker sama."""
+    segs = _monologue_segments()
+    turns = [SpeakerTurn(0.0, 10_000.0, "SPEAKER_00")]
+    out = _stream(list(turns), segs, block_max_words=40)
+    assert len(out) > 1, "blok panjang tak dipecah"
+    assert {ln.speaker for ln in out} == {"SPEAKER_00"}, "pemecahan mengubah speaker"
+    # Tiap baris berakhir di batas kalimat — tak ada kalimat yang terbelah.
+    for ln in out[:-1]:
+        assert ln.text.rstrip().endswith("."), f"terpotong di tengah kalimat: {ln.text[-40:]}"
+
+
+def test_readability_split_preserves_text_and_speaker():
+    """Gerbang keselamatan: pemecahan ini KOSMETIK. Teks gabungan & label per-KATA
+    harus identik dengan hasil tanpa pemecahan."""
+    segs = _monologue_segments()
+    turns = [SpeakerTurn(0.0, 10_000.0, "SPEAKER_00")]
+    plain = _stream([SpeakerTurn(t.start, t.end, t.speaker) for t in turns], segs,
+                    block_max_words=0)
+    split = _stream([SpeakerTurn(t.start, t.end, t.speaker) for t in turns], segs,
+                    block_max_words=40)
+    assert " ".join(l.text for l in plain) == " ".join(l.text for l in split)
+    per_word = lambda lines: [l.speaker for l in lines for _ in l.text.split()]
+    assert per_word(plain) == per_word(split)
+    times = [l.start for l in split]
+    assert times == sorted(times), "timestamp mundur sesudah dipecah"
+
+
+def test_readability_split_off_by_zero():
+    segs = _monologue_segments()
+    turns = [SpeakerTurn(0.0, 10_000.0, "SPEAKER_00")]
+    out = _stream(list(turns), segs, block_max_words=0)
+    assert len(out) == 1, "block_max_words=0 harus mengembalikan perilaku lama"
+
+
+def test_short_turns_untouched_by_readability_cap():
+    # Percakapan normal (baris pendek) tak boleh berubah sama sekali.
+    turns = [SpeakerTurn(0.0, 2.0, "SPEAKER_00"), SpeakerTurn(2.0, 4.0, "SPEAKER_01")]
+    segs = [_seg(0.0, 1.8, "hello there.", [(0.0, 0.8, "hello"), (0.9, 1.8, "there.")]),
+            _seg(2.1, 3.9, "hi back.", [(2.1, 2.8, "hi"), (3.0, 3.9, "back.")])]
+    a = _stream([SpeakerTurn(t.start, t.end, t.speaker) for t in turns], segs,
+                block_max_words=0)
+    b = _stream([SpeakerTurn(t.start, t.end, t.speaker) for t in turns], segs,
+                block_max_words=120)
+    assert [(l.speaker, l.text) for l in a] == [(l.speaker, l.text) for l in b]
+
+
 if __name__ == "__main__":
     # Runner ringan tanpa pytest — biar bisa jalan di venv minimal.
     import traceback

@@ -164,7 +164,7 @@ class StreamingMerger:
 
     def __init__(self, turns: list[SpeakerTurn], island_max_s: float = 4.0,
                  sentence_gap_s: float = 1.2, lookahead: int = 2,
-                 sentence_max_s: float = 15.0):
+                 sentence_max_s: float = 15.0, block_max_words: int = 120):
         self.turns = turns
         self.island_max_s = island_max_s   # durasi maks sebuah "island"
         self.sentence_gap_s = sentence_gap_s  # jeda yang memaksa batas kalimat
@@ -178,6 +178,15 @@ class StreamingMerger:
         # orang bicara panjang tanpa titik), tetap lanjut — kita hanya cegah
         # atribusi silang, bukan pecah orang yang sama.
         self.sentence_max_s = sentence_max_s
+        # Batas KETERBACAAN (bukan kebenaran): satu giliran bicara panjang tetap
+        # milik satu orang, tapi menuliskannya sebagai satu baris 266 kata membuat
+        # .txt sulit dibaca & timestamp-nya jarang. Di atas ambang ini, blok dipecah
+        # DI BATAS KALIMAT ke baris baru dengan speaker yang SAMA — teks & label tak
+        # berubah, hanya dapat baris + jam sendiri. 0 = matikan.
+        # Diverifikasi (rekaman 22): keenam blok >=60 dtk yang tersisa memang MONOLOG
+        # asli (diarization: dominan 91-100%), jadi memecahnya untuk atribusi akan
+        # SALAH; yang dibutuhkan cuma keterbacaan.
+        self.block_max_words = block_max_words
         self.lookahead = lookahead         # blok ditahan utk deteksi island
         self.prev_speaker = None
         self._wordbuf = []   # (start,end,text) menunggu kalimat tuntas
@@ -234,8 +243,15 @@ class StreamingMerger:
             self.prev_speaker = sp
             self._append_block(ss, se, sp, text)
 
+    def _too_long(self, block) -> bool:
+        """Blok sudah melewati ambang keterbacaan -> kalimat berikutnya mulai baris
+        baru (speaker sama). Dicek juga di _coalesce, kalau tidak island-suppression
+        akan menyatukannya kembali dan pemecahan ini sia-sia."""
+        return bool(self.block_max_words) and len(block.text.split()) >= self.block_max_words
+
     def _append_block(self, ss, se, sp, text):
-        if self._blocks and self._blocks[-1].speaker == sp:
+        if (self._blocks and self._blocks[-1].speaker == sp
+                and not self._too_long(self._blocks[-1])):
             b = self._blocks[-1]
             b.end = se
             b.text = (b.text + " " + text).strip()
@@ -245,7 +261,7 @@ class StreamingMerger:
     def _coalesce(self, blocks):
         out = []
         for b in blocks:
-            if out and out[-1].speaker == b.speaker:
+            if out and out[-1].speaker == b.speaker and not self._too_long(out[-1]):
                 out[-1].end = b.end
                 out[-1].text = (out[-1].text + " " + b.text).strip()
             else:
