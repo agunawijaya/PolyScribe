@@ -206,11 +206,32 @@ Unit test (100 hijau; jalankan semua 11 file di tests\):
     diar_min_speaker_frac  = 0.010 / pyannote: 0.0
     merge_island_max_s     = 4.0   / pyannote: 0.0
 
-## Isu terbuka v1 (jujur)
-1. **pyannote selalu ~5 speaker di file panjang** — koheren sejauh diuji, tapi BELUM
-   diuji pada rapat berpeserta banyak (8+). Kalau muncul rapat besar, verifikasi jumlah.
-2. **Micro-triple 25:28-25:30** ("Yeah."/"Exactly.") masih menyatu — batas **ASR**
-   (satu segmen Whisper), bukan diarization. Seri dengan OPPO, bukan kalah.
-3. **Mode Akurat ~2,5× lebih lambat** — rekaman 1 jam ≈ 1 jam pemrosesan.
-4. **Sisa halusinasi lokal** (2 titik di Std-12) — ditandai & dipangkas, tak meluas.
-5. **Ditunda (ruang lingkup beku):** packaging .exe, profil NVIDIA, distribusi.
+## Isu terbuka (jujur) — diperbarui 2026-08-11
+
+**Risiko yang BELUM terukur (paling penting — jangan diklaim aman):**
+1. **`-mc 24` belum diuji di rekaman >45 menit.** Nilai lama (8) dipilih dari sweep
+   di Std-12 PENUH (102 mnt) yang loop-nya di 47:37 & 1:12:21. Bukti terpanjang yang
+   ada sekarang cuma 43 menit; file Std-12 sudah tak ada di mesin ini. Kalau muncul
+   rekaman panjang: jalankan `prompts\scripts\tester51_mc_loopgate.py` (ganti FIXTURE)
+   SEBELUM percaya. Gejala pertama kalau salah: banyak penanda PERINGATAN loop.
+2. **Arab masih rawan blok raksasa.** Contoh tanda baca hanya untuk `"en"` — prompt
+   Inggris membuat whisper MENERJEMAHKAN audio Arab, prompt Arab membuat output
+   runtuh (dua-duanya terukur di fixture 90 dtk). Fixture Arab tanpa prompt = 5,3
+   tanda baca/100 kata, di bawah gerbang 15 → merge kemungkinan besar melebur giliran
+   seperti sebelum perbaikan. BELUM diuji di rekaman Arab panjang (tak ada).
+3. **Indonesia belum pernah diukur sama sekali** — tak ada fixture. `"id"` tak dapat
+   prompt. Status kualitasnya tidak diketahui, bukan "baik".
+
+**Diketahui & diterima:**
+4. **pyannote ~5 speaker di file panjang** — koheren sejauh diuji, BELUM diuji pada
+   rapat berpeserta banyak (8+). Kalau muncul rapat besar, verifikasi jumlahnya.
+5. **Mode Akurat ~2,3× lebih lambat** (diukur: diar pyannote 1495 dtk vs sherpa 646
+   dtk di rekaman 43 mnt).
+6. **Blok panjang yang tersisa = monolog ASLI**, bukan cacat merge — diverifikasi
+   terhadap output diarization (dominan 91-100%). Jangan "memperbaikinya" dengan
+   memecah per-speaker; yang dipakai sekarang hanya pemecahan KETERBACAAN.
+7. **Micro-triple 25:28-25:30** (Std-11) belum diukur ulang sesudah `-mc 24` + prompt;
+   status lama "seri dengan OPPO" berasal dari ASR lama.
+
+**Ditunda (ruang lingkup beku):** packaging .exe, distribusi.
+**Aktif, bukan lagi ditunda:** profil NVIDIA — lihat `HANDOFF_NVIDIA_PM.md`.
