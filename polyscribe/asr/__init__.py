@@ -13,6 +13,12 @@ def select_asr_backend(caps, config) -> AsrBackend:
     # Override eksplisit dari CLI menang atas deteksi otomatis.
     forced = getattr(config, "asr_backend", "auto")
 
+    # Jalur cloud (2026-09-21 — opt-in, jangan pernah dipilih auto). Provider
+    # dipilih di config.cloud_provider; kesalahan konfigurasi (kosong / tak
+    # dikenal) melempar RuntimeError dgn pesan ramah supaya GUI/CLI tampilkan.
+    if forced == "cloud":
+        return _cloud(config)
+
     if forced == "faster-whisper":
         return _faster_whisper_for(caps, config)
     if forced == "whispercpp":
@@ -66,6 +72,19 @@ def _whispercpp(config) -> AsrBackend:
             "Pakai --backend faster-whisper atau --backend auto."
         )
     return WhisperCppVulkanBackend(config)
+
+
+def _cloud(config) -> AsrBackend:
+    """Bangun backend cloud dari registry. Kesalahan konfigurasi (provider kosong
+    atau tak dikenal) diangkat sbg RuntimeError dgn pesan yg GUI/CLI tampilkan."""
+    provider = getattr(config, "cloud_provider", "") or ""
+    if not provider:
+        raise RuntimeError(
+            "Backend cloud diminta tapi cloud_provider kosong. Pilih provider "
+            "di GUI (tab 'Backend & API Keys') atau --asr cloud:<provider>."
+        )
+    from .cloud import build_backend
+    return build_backend(provider, config)
 
 
 __all__ = [

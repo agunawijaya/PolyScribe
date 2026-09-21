@@ -23,6 +23,7 @@ from .progress import ProgressEvent, ProgressSink
 # Nama tahap yang enak dibaca manusia untuk indikator.
 STAGE_LABEL = {
     "load": "memuat model",
+    "diarize_prep": "menyiapkan",
     "transcribe": "transkripsi",
     "diarize": "diarization",
     "merge": "menggabung",
@@ -50,6 +51,11 @@ class ConsoleSink(ProgressSink):
         line = f"[{elapsed:6.1f}s] {label:<12} {pct:3d}%"
         if snippet:
             line += f"  | {snippet}"
+        elif event.message:
+            # Untuk tahap bertahap-langkah tanpa snippet ASR (mis. load sub-message
+            # "mendekode audio", "memuat ASR"), tampilkan message supaya user lihat
+            # gerakan per langkah — bukan "memuat model 0%" bisu.
+            line += f"  | {event.message}"
 
         # Timpa baris sebelumnya (carriage return + padding sisa).
         pad = max(0, self._last_len - len(line))
@@ -68,6 +74,19 @@ def build_config(args) -> Config:
     cfg = Config()
     if args.backend:
         cfg.asr_backend = args.backend
+    # --asr cloud:<provider> (2026-09-21) — opt-in ke tumpukan cloud STT. Nilai
+    # dipetakan ke asr_backend="cloud" + cloud_provider=<provider>. Tanpa flag ini,
+    # jalur default TETAP offline (batasan keras CLAUDE.md).
+    if getattr(args, "asr", None):
+        val = args.asr.strip().lower()
+        if val.startswith("cloud:"):
+            cfg.asr_backend = "cloud"
+            cfg.cloud_provider = val.split(":", 1)[1]
+        elif val == "offline":
+            pass    # tak mengubah — cfg.asr_backend sudah diisi --backend / default
+        else:
+            raise SystemExit(f"--asr harus 'offline' atau 'cloud:<provider>'. "
+                             f"Dapat: {args.asr}")
     if args.cluster_threshold is not None:
         cfg.cluster_threshold = args.cluster_threshold
     if args.language:
@@ -107,7 +126,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("audio", help="path file audio (WAV/MP3/…)")
     parser.add_argument(
         "--backend", choices=["auto", "faster-whisper", "whispercpp"],
-        default="auto", help="pilih backend ASR (default: auto)",
+        default="auto", help="pilih backend ASR offline (default: auto)",
+    )
+    parser.add_argument(
+        "--asr", default=None,
+        help="'offline' (default, sama dgn --backend) atau 'cloud:<provider>'. "
+             "Provider cloud: google_web | groq | deepgram | openai_whisper | "
+             "assemblyai | azure_speech | google_cloud. Butuh API key di GUI dulu.",
     )
     parser.add_argument(
         "--cluster-threshold", type=float, default=None,
@@ -167,6 +192,17 @@ def main(argv=None) -> int:
         if not ready:
             print(f"Catatan: {reason}\n  -> memakai mode Cepat (sherpa) untuk run ini.")
             cfg.diarizer_choice = "sherpa"
+
+    # Validasi batas ukuran/durasi cloud SEBELUM mulai (gagal cepat, bukan setelah
+    # loader model berjalan 30 detik). Berlaku hanya untuk backend cloud.
+    if cfg.asr_backend == "cloud" and cfg.cloud_provider:
+        from .asr.cloud import validate_audio
+        verdict = validate_audio(cfg.cloud_provider, args.audio)
+        if not verdict.ok:
+            print(f"\nError validasi cloud:\n{verdict.error}", file=sys.stderr)
+            return 2
+        if verdict.warning:
+            print(f"\nPeringatan: {verdict.warning}\n", file=sys.stderr)
 
     sink = ConsoleSink()
 

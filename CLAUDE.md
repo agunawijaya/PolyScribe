@@ -16,8 +16,25 @@ manifest model / ketahanan link mati / provisioning manual, profil & probe lapto
 NVIDIA. Jalan dari venv saja sudah cukup untuk v1.
 
 ## Batasan keras (jangan dilanggar)
-- Offline penuh. Tidak ada panggilan cloud. Tidak ada login / token pada jalur
-  utama (plan A).
+- **Offline = DEFAULT, cloud = opt-in.** Jalur default (yang dipakai kalau user
+  tak menyentuh apa pun) HARUS jalan tanpa internet, tanpa akun, tanpa token —
+  model yang dibundel wajib bisa transkripsi + diarization sendirian. Cloud STT
+  boleh ditawarkan sebagai backend ASR opsional (per-run pilihan user di GUI/CLI)
+  demi kualitas tertinggi; ini keputusan user 2026-09-21, membuka batasan lama
+  "offline penuh". Aturan yang MASIH berlaku:
+    - Cloud tak boleh jadi default. Pengaturan pertama kali = offline.
+    - API key masuk lewat GUI (tab "Backend & API Keys") dan disimpan di Windows
+      Credential Manager via library `keyring` — TIDAK di plaintext, TIDAK di
+      config.json, TIDAK di variabel lingkungan yang di-commit. Field UI
+      write-once: setelah simpan, key tak pernah ditampilkan lagi (mask ●●●●
+      + tombol Ganti/Hapus).
+    - Provider yang tak menghasilkan speaker labels (mis. Google Web Speech) TETAP
+      dapat diarization dari pyannote/sherpa lokal — cloud hanya menggantikan
+      lapisan ASR. Ini kekuatan arsitektur `AsrBackend`/`Diarizer` yang pluggable.
+    - Warning inline di UI saat memilih provider yang tak lengkap kapabilitasnya
+      (mis. Google Web Speech: "tak ada timestamp, akan diperkirakan linear").
+    - Diarization TIDAK boleh cloud — audio rapat rapat cukup sensitif jadi
+      minimal separuh pipeline tetap lokal.
 - Target hardware = TIGA KELAS mesin. Aplikasi WAJIB **jalan** di ketiganya:
   (1) NVIDIA (CUDA) — **acuan kualitas**, mesin terkuat user;
   (2) AMD Ryzen AI 7 350 — iGPU Radeon 860M (Vulkan) / CPU. Tidak ada CUDA;
@@ -75,6 +92,16 @@ profile, DAN — sejak 2026-08-11 — boleh juga tumpukan backend-nya (lihat Bat
 - ASR backend B = whisper.cpp large-v3 via Vulkan (subprocess ke
   vendor/whisper-cli/whisper-cli.exe) = jalur cepat untuk iGPU Radeon 860M di
   laptop AMD. Otomatis fallback ke CPU bila Vulkan tak ada.
+- ASR backend C = **cloud** (opt-in, 2026-09-21). Enam provider terpasang di
+  `polyscribe/asr/cloud/`: Google Web Speech (gratis, endpoint demo tak resmi
+  — sama dgn markitdown), Groq Whisper large-v3 (termurah + tercepat),
+  OpenAI Whisper, Deepgram Nova-3 (kualitas tertinggi + diarization native),
+  AssemblyAI, Azure Speech, Google Cloud Speech. Semua mengikuti kontrak
+  `AsrBackend` sama — pipeline tak sadar apakah backend cloud atau lokal.
+  Untuk provider tanpa timestamp, adapter membangkitkan pseudo-timestamp linear;
+  untuk yang tanpa diarization, tetap pakai pyannote/sherpa lokal. API key
+  dibaca dari `polyscribe/keystore.py` (Windows Credential Manager). Dipilih
+  lewat GUI tab baru atau `--asr cloud:<provider>` di CLI.
 - Diarization = dua backend pluggable lewat kontrak `Diarizer`.
   **`pyannote` (Akurat) = DEFAULT** — overlap-aware, memisahkan pertukaran cepat;
   ~2,5× lebih lambat (embedding di CPU; auto CUDA di laptop NVIDIA). **`sherpa`
@@ -103,7 +130,10 @@ terpasang (Store bermasalah untuk native lib & PyInstaller).
 **Struktur folder (ringkas).**
     polyscribe\  audio.py, pipeline.py, merge.py, formatting.py, progress.py,
                  loopguard.py, spatial.py, hardware.py, cli.py, gui.py,
-                 asr\ (base, faster_whisper_backend, whispercpp_backend),
+                 keystore.py (2026-09-21, credential vault untuk API cloud),
+                 asr\ (base, faster_whisper_backend, whispercpp_backend,
+                       cloud\ = base, registry, google_web, groq, openai,
+                              deepgram, assemblyai, azure, google_cloud),
                  diarization\ (base, sherpa_onnx_backend, pyannote_backend, cleanup)
     models\      whisper\, faster-whisper-large-v3\, diarization\ (sherpa +
                  pyannote\ community-1)  (offline, no-commit)
@@ -115,7 +145,11 @@ terpasang (Store bermasalah untuk native lib & PyInstaller).
 **Dependency inti.** faster-whisper, sherpa-onnx, onnxruntime, soundfile, numpy,
 imageio-ffmpeg (runtime); pyinstaller (build); tkinter (GUI, bawaan). **Mode Akurat
 (pyannote)** menambah pyannote.audio + PyTorch (CPU ~494 MB) — DIPISAH di
-`requirements-pyannote.txt` supaya jalur inti (plan A) tak terseret PyTorch. Versi
+`requirements-pyannote.txt` supaya jalur inti (plan A) tak terseret PyTorch.
+**Mode cloud** (opsional, 2026-09-21) menambah `keyring` + `requests` + `pydub`
+(chunker) + `SpeechRecognition` (untuk Google Web Speech) — DIPISAH di
+`requirements-cloud.txt`. Provider SDK sengaja TAK dipakai; semua adapter panggil
+HTTP endpoint langsung agar install ringan & tak terikat versi SDK vendor. Versi
 dikunci lewat pip freeze setelah instalasi pertama yang berhasil. whisper-cli
 Vulkan bukan paket pip — disiapkan manual di vendor/. Build profile per-hardware
 (CUDA vs AMD/Vulkan) membundel binary berbeda; detail di design revision.
@@ -241,6 +275,40 @@ Unit test (100 hijau; jalankan semua 11 file di tests\):
    memecah per-speaker; yang dipakai sekarang hanya pemecahan KETERBACAAN.
 7. **Micro-triple 25:28-25:30** (Std-11) belum diukur ulang sesudah `-mc 24` + prompt;
    status lama "seri dengan OPPO" berasal dari ASR lama.
+
+**Cloud backends (opsional, ditambahkan 2026-09-21):**
+8. **Google Web Speech = endpoint tak resmi.** `speech_recognition.recognize_google()`
+   memakai demo API key hard-coded Google (Chrome Speech). Rate limit ~50 req/hari
+   dibagi ke semua user library `speech_recognition` di dunia; bisa dimatikan
+   Google kapan saja. Tak ada SLA. Backend ini disediakan sebagai "pembanding
+   markitdown"; **jangan menjadikannya default**. Kualitasnya rendah untuk audio
+   non-Inggris & non-studio.
+9. **Backend cloud belum diuji end-to-end** dgn API key sungguhan di mesin ini —
+   kode adapter ditulis dari spesifikasi HTTP resmi vendor; error handling
+   (rate limit 429, auth 401, quota 402) baru di-mock, belum divalidasi hidup.
+   Sebelum merekomendasi ke user, uji manual satu klip 5 mnt per provider.
+10. **Diarization tetap lokal untuk semua jalur cloud.** Cloud provider yg
+    menawarkan speaker labels (Deepgram/AssemblyAI/Azure/Google Cloud) HASIL
+    diarization-nya diabaikan; pipeline tetap menjalankan pyannote/sherpa lokal.
+    Alasan: (a) konsistensi output antar-provider, (b) merge.py hanya paham satu
+    sumber label. Kalau nanti mau memakai diarization cloud, itu proyek terpisah
+    (butuh format normalisasi turn per-provider).
+11. **Batas ukuran/durasi per provider (2026-09-21).** Divalidasi di
+    `polyscribe/asr/cloud/validation.py` SEBELUM pipeline mulai. GUI/CLI menolak
+    file yg melewati batas dgn pesan yg menyebut solusi. Nilai referensi:
+      - google_web: chunk 30 dtk otomatis; rate limit ~50 req/hari SHARE dgn
+        semua user library speech_recognition -> warning kalau file >15 mnt.
+      - groq: 25 MB/request, auto-chunk 5 mnt.
+      - deepgram: 2 GB / 10 jam, upload utuh.
+      - openai_whisper: 25 MB/request, auto-chunk 5 mnt.
+      - assemblyai: 5 GB / 10 jam, upload utuh.
+      - azure_speech: 200 MB / 2 jam (Fast Transcription API sync). Batch
+        Transcription (butuh Blob Storage) BELUM didukung.
+      - google_cloud: 10 MB / **60 detik** (v2 recognize inline). File lebih
+        panjang butuh BatchRecognize + GCS bucket — BELUM didukung. Provider
+        ini praktis TAK BERGUNA untuk rapat; tetap tersimpan sbg opsi coba-coba.
+    Kalau menambah provider baru: WAJIB isi `max_size_mb`/`max_duration_s`/
+    `auto_chunks` di registry, atau validasi akan lewat diam-diam.
 
 **Ditunda (ruang lingkup beku):** packaging .exe, distribusi.
 **Aktif, bukan lagi ditunda:** profil NVIDIA — lihat `HANDOFF_NVIDIA_PM.md`.

@@ -1,0 +1,33 @@
+# Dependency opsional untuk backend cloud STT (2026-09-21).
+#
+# INSTALL HANYA BILA kamu berencana pakai backend cloud (Groq / Deepgram / OpenAI /
+# AssemblyAI / Azure / Google Cloud / Google Web Speech). Jalur default PolyScribe
+# tetap offline dan TIDAK butuh apa pun di sini.
+#
+# Cara pasang:
+#     & $py -m pip install -r requirements-cloud.txt
+#
+# Sengaja TIDAK memakai SDK vendor (google-cloud-speech, openai, dst.) — semua
+# adapter di polyscribe/asr/cloud/ memanggil HTTP endpoint langsung via `requests`.
+# Alasan: (1) install ringan (~5 MB total vs ~200 MB SDK bertumpuk), (2) tak
+# terikat versi SDK vendor yang gemar breaking change, (3) tak menyeret dep
+# transient yg berbenturan dgn faster-whisper/pyannote.
+
+# Vault key OS-native (Windows Credential Manager / Mac Keychain / Linux Secret
+# Service). Wajib — kita TIDAK menyimpan key plaintext di file.
+keyring>=24.0
+
+# HTTP client untuk semua adapter cloud. Sudah ada dep transient di banyak paket,
+# tapi kunci di sini supaya versi diketahui.
+requests>=2.31
+
+# Untuk Google Web Speech (backend "gratis" yang dipakai markitdown). Dep ini
+# sengaja terpisah karena hanya perlu untuk satu backend; user yang tak butuh
+# Google Web Speech bisa uninstall setelah instal.
+SpeechRecognition>=3.10
+
+# Chunker audio ringan (dipakai chunk_wav helper kalau perlu format conversion).
+# Kita pakai wave stdlib untuk PCM 16k mono kita, jadi pydub sebenarnya opsional
+# di batch pertama — pasang untuk masa depan (mis. streaming ke provider yg minta
+# format spesifik).
+pydub>=0.25

@@ -48,7 +48,14 @@ class Config:
     # --- pemilihan hardware / backend ---
     build_profile: str = "amd"        # ditimpa oleh profile.json bawaan build
     allow_vulkan: bool = True         # matikan untuk memaksa CPU di AMD
-    asr_backend: str = "auto"         # "auto" | "faster-whisper" | "whispercpp"
+    # asr_backend: "auto" | "faster-whisper" | "whispercpp" | "cloud"
+    # 2026-09-21: "cloud" opt-in menambah tumpukan cloud STT (7 provider).
+    # Default TETAP "auto" (offline) — sesuai batasan keras CLAUDE.md.
+    asr_backend: str = "auto"
+    # Kalau asr_backend="cloud", provider dipilih dari registry:
+    # google_web | groq | deepgram | openai_whisper | assemblyai |
+    # azure_speech | google_cloud. Nilai kosong = tak valid saat backend="cloud".
+    cloud_provider: str = ""
     asr_compute_type: str = ""        # kosong = biar selector yang pilih
 
     # --- ASR knob untuk kualitas transkrip (bug user 2026-08 kualitas rendah) ---
