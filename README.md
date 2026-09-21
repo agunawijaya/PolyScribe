@@ -1,12 +1,14 @@
 # PolyScribe
 
 > **Transkripsi rapat offline yang cepat, multi-bahasa, dan menjaga privasi kamu.**
-> Ubah rekaman audio jadi transkrip berlabel pembicara — tanpa kirim satu byte pun ke cloud.
+> Default 100% di laptop kamu. Opsional: pakai backend cloud (Groq / Deepgram / dll)
+> kalau kualitas paling tinggi lebih penting dari privasi mutlak — pilihan kamu, per rekaman.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey.svg)](https://www.microsoft.com/windows)
-[![Offline](https://img.shields.io/badge/runtime-100%25%20offline-brightgreen.svg)](#privasi-adalah-fitur)
+[![Offline default](https://img.shields.io/badge/default-offline-brightgreen.svg)](#privasi-adalah-fitur)
+[![Cloud opt-in](https://img.shields.io/badge/cloud-opt--in-blue.svg)](#-cloud-opsional-bila-butuh-kualitas-maksimum)
 [![Bahasa](https://img.shields.io/badge/languages-EN%20%2B%20AR%20%2B%20ID-orange.svg)](#kelebihan-utama)
 
 ```mermaid
@@ -28,34 +30,71 @@ Kamu punya rekaman rapat 1 jam. Isinya penting: keputusan, tindak lanjut,
 komitmen tim. Tapi:
 
 - **Kirim ke Otter/Rev/Zoom transcription?** Bagaimana kalau isinya M&A,
-  strategi kompetitif, atau HR sensitif? Data rapat keluar dari kendali kamu.
+  strategi kompetitif, atau HR sensitif? Data rapat keluar dari kendali kamu —
+  dan kamu tak selalu bisa memilih SIAPA yang meng-hostkan model.
 - **Ketik ulang manual?** 1 jam audio = 3-4 jam kerja. Setiap minggu.
 - **Whisper open-source?** Bagus, tapi cuma menghasilkan **teks tanpa label
   pembicara**. Kamu masih perlu tebak sendiri siapa bicara kapan.
 - **Rapat bahasa campur** (Indonesia + English + Arab)? Kebanyakan layanan
   cuma dioptimasi satu bahasa.
 
-**PolyScribe menjawab semuanya.** Offline, multi-bahasa, auto-detect
-pembicara, jalan di laptop biasa.
+**PolyScribe menjawab semuanya.** Offline default (nol jaringan), multi-bahasa,
+auto-detect pembicara, jalan di laptop biasa. Dan bila kamu memilih — cloud
+opt-in per rekaman untuk kualitas ekstra, dengan API key kamu (bukan kami)
+tersimpan di Windows Credential Manager.
 
 ---
 
 ## Kelebihan utama
 
-### 🔒 Privasi adalah fitur
+### 🔒 Privasi adalah fitur (default)
 
-- **Nol panggilan jaringan** saat pemrosesan. Audio & transkrip tidak pernah
-  keluar dari laptop kamu.
-- **Tidak ada akun**, tidak ada token, tidak ada login. Buka aplikasi, drop
-  file, dapat transkrip.
+- **Default = nol panggilan jaringan** saat pemrosesan. Audio & transkrip tidak
+  pernah keluar dari laptop kamu.
+- **Default = tidak ada akun, token, login**. Buka aplikasi, drop file, dapat
+  transkrip.
 - Cocok untuk rapat sensitif: **HR, legal, M&A, strategi, wawancara
   narasumber**.
+- Jalur cloud opsional **tidak pernah** dipilih otomatis — kamu harus secara
+  eksplisit set backend ke "Cloud" di GUI atau `--asr cloud:<provider>` di CLI,
+  dan API key harus di-set lebih dulu. Tanpa itu, PolyScribe tetap 100% offline.
 
 ### 🌏 Multi-bahasa, boleh dicampur
 
 - **Inggris, Arab, Indonesia** — bisa **tercampur dalam satu rekaman**.
 - Ideal untuk lingkungan rapat multinasional atau meeting yang berpindah
   bahasa di tengah.
+
+### 🎛️ Cloud opsional (bila butuh kualitas maksimum)
+
+Kadang kamu punya rekaman yang **bukan sensitif** (mis. podcast publik, kuliah
+terbuka, sesi conference yang sudah publik) dan ingin kualitas transkripsi
+terbaik yang tersedia. PolyScribe menyediakan 7 backend cloud opsional — bukan
+sebagai default, tapi sebagai pilihan sadar per rekaman.
+
+| Provider | ± Harga/jam | Catatan singkat |
+|---|:---:|---|
+| **Groq** (Whisper large-v3) | $0.04 | Termurah + tercepat (~200× realtime). Model SAMA dgn offline PolyScribe — bagus untuk benchmark |
+| **Deepgram Nova-3** | $0.26 | Kualitas tertinggi + diarization native. Kredit gratis $200 saat daftar |
+| OpenAI Whisper | $0.36 | Reliable, mahal |
+| AssemblyAI Universal-2 | $0.37 | Alternatif Deepgram |
+| Azure Speech | $1.00 | Dukungan bahasa paling luas |
+| Google Cloud chirp_2 | $0.96 | Batas keras 60 detik (mode sinkron) — kurang cocok untuk rapat |
+| Google Web Speech | gratis | Endpoint demo tak resmi (sama dgn markitdown Microsoft). Rate limit ~50 req/hari SHARE ke semua user library `speech_recognition` di dunia. Kualitas rendah untuk non-Inggris. Disediakan sbg pembanding, bukan produksi |
+
+**Yang perlu kamu tahu tentang jalur cloud:**
+- **API key kamu, bukan kami.** Kamu daftar akun sendiri, dapat key sendiri.
+- **Disimpan di Windows Credential Manager** (encrypted OS-level), bukan file
+  plaintext di `%APPDATA%`.
+- **Write-once di GUI** — setelah tersimpan, key TIDAK PERNAH ditampilkan lagi.
+  Hanya bisa Diganti atau Dihapus.
+- **Diarization tetap lokal** (pyannote / sherpa) untuk semua jalur cloud —
+  hanya lapisan ASR yg cloud. Konsistensi output antar-provider terjaga.
+- **Batas ukuran divalidasi** sebelum pipeline mulai — kesalahan config muncul
+  instan, bukan setelah 30 detik "Memuat model".
+
+Setup: `pip install -r requirements-cloud.txt` → GUI tab "Backend & API Keys"
+→ set key provider yg kamu punya → di tab Transkripsi pilih backend "Cloud".
 
 ### ⚡ Cepat di hardware yang kamu sudah punya
 
@@ -126,7 +165,7 @@ otomatis, timestamp presisi. Ini output nyata dari pipeline PolyScribe.
 
 ## Perbandingan singkat
 
-| Aspek | PolyScribe | Layanan transkripsi cloud |
+| Aspek | PolyScribe (offline default) | Layanan transkripsi cloud murni |
 |-------|:---------:|:------------------------:|
 | Privasi (data di laptop kamu) | ✅ | ❌ (di server pihak ketiga) |
 | Bahasa campur EN + AR + ID | ✅ | ⚠️ Sering satu bahasa dominan |
@@ -135,7 +174,12 @@ otomatis, timestamp presisi. Ini output nyata dari pipeline PolyScribe.
 | Jalan offline (tanpa internet) | ✅ | ❌ |
 | Cocok untuk rapat sensitif (HR/legal/M&A) | ✅ | Tergantung SLA + trust |
 | Setup pertama | ~10 menit | Sign up + upload |
-| Compatible dengan air-gapped environment | ✅ | ❌ |
+| Compatible dgn air-gapped environment | ✅ | ❌ |
+| **Bisa PILIH cloud kalau butuh** kualitas maksimum | ✅ (7 provider, opt-in per rekaman, API key di Credential Manager) | — |
+
+PolyScribe adalah **satu-satunya** dari daftar ini yg memberimu KEDUA pilihan:
+default privasi-total, dan cloud kalau kamu memang butuh — dgn arsitektur yg
+sama, GUI yg sama, output yg sama.
 
 ---
 
@@ -204,6 +248,24 @@ Butuh:
 
 Panduan bergambar untuk pengguna baru: [CARA_UNDUH_PYANNOTE.md](CARA_UNDUH_PYANNOTE.md).
 
+### Cloud opsional (7 provider — bila ingin backend cloud tersedia)
+
+```powershell
+& .\.venv\Scripts\python.exe -m pip install -r requirements-cloud.txt
+```
+
+Menambah `keyring` (Windows Credential Manager), `requests`, `SpeechRecognition`
+(untuk Google Web Speech), `pydub`. Tidak menyeret SDK vendor — semua adapter
+memanggil HTTP endpoint langsung supaya install ringan.
+
+Setelah instal, buka GUI: `python -m polyscribe.gui` → tab **"Backend & API
+Keys"** → klik **[Set / Ganti]** di provider yg kamu punya keynya. Key tersimpan
+di Windows Credential Manager (encrypted), tak pernah ditampilkan kembali
+setelah simpan.
+
+**Jalur default TETAP offline** setelah instal ini — kamu harus eksplisit pilih
+backend Cloud di GUI atau `--asr cloud:<provider>` di CLI.
+
 ---
 
 ## Pemakaian lanjutan
@@ -230,6 +292,11 @@ $py = ".\.venv\Scripts\python.exe"
 
 # Tuning speaker clustering
 & $py -m polyscribe.cli "rekaman.mp3" --cluster-threshold 0.8
+
+# Cloud opt-in (butuh requirements-cloud.txt + API key sudah di-set via GUI)
+& $py -m polyscribe.cli "rekaman.mp3" --asr cloud:groq
+& $py -m polyscribe.cli "rekaman.mp3" --asr cloud:deepgram
+& $py -m polyscribe.cli "rekaman.mp3" --asr cloud:google_web    # gratis, pembanding markitdown
 ```
 
 ### GUI (paling ramah non-teknis)
@@ -246,6 +313,11 @@ Fitur GUI:
 - Dropdown bahasa (Inggris / Indonesia / Auto)
 - Toggle mode Akurat/Cepat
 - Toggle GPU on/off
+- **Toggle Backend: Offline (default) atau Cloud** — dgn dropdown 7 provider,
+  hint harga/kapabilitas/batas ukuran per provider
+- **Tab "Backend & API Keys"** — kelola API key semua provider di satu tempat.
+  Write-once (setelah simpan, hanya bisa Diganti/Dihapus). Disimpan di Windows
+  Credential Manager
 - **Tombol Stop** — hentikan run dengan rapi, transkrip parsial tersimpan
 
 ---
@@ -325,12 +397,16 @@ Detail scope: [docs/PRODUCT_SPEC.md §6](docs/PRODUCT_SPEC.md#6-scope).
 
 ```
 polyscribe/     kode aplikasi (pipeline, ASR, diarization, GUI, CLI)
-  asr/          backend ASR (faster-whisper, whisper.cpp Vulkan)
+  asr/          backend ASR pluggable
+    faster_whisper_backend.py    (offline: CUDA / CPU int8)
+    whispercpp_backend.py        (offline: Vulkan iGPU AMD)
+    cloud/                       (opsional: 7 provider cloud)
   diarization/  backend diarization (sherpa-onnx, pyannote) — pluggable
+  keystore.py   API key vault (Windows Credential Manager)
 models/         model AI (TIDAK di-commit — unduh via scripts/)
 vendor/         binary native Vulkan (TIDAK di-commit — siapkan manual)
 scripts/        download_models.py, benchmark, tools
-tests/          unit test (75 test, ≥ 74 harus lulus)
+tests/          unit test (~120 test)
 docs/           ARCHITECTURE, PRODUCT_SPEC, MODELS
 ```
 
@@ -366,7 +442,8 @@ ketiga tunduk pada lisensi masing-masing — lihat [docs/MODELS.md](docs/MODELS.
 
 <div align="center">
 
-**Buat pribadi. Simpan pribadi.**
-Karena rekaman rapat kamu bukan urusan siapa pun kecuali kamu.
+**Buat pribadi. Simpan pribadi. Pilih kalau butuh lain.**
+Default 100% di laptop kamu. Cloud opt-in kalau kamu memang perlu — dgn API
+key kamu sendiri di Windows Credential Manager, bukan di server kami.
 
 </div>
