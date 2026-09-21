@@ -114,12 +114,18 @@ class SherpaOnnxDiarizer(Diarizer):
                 f"Decode lewat audio.decode_to_16k_mono dulu."
             )
 
+        # Jendela BISU sherpa (2026-08): sebelum callback pertama, sherpa menjalankan
+        # pass segmentasi ONNX di seluruh audio TANPA callback (~143 dtk untuk file
+        # 1 jam). Emit dgn stage="diarize_prep" supaya GUI menampilkan bar berdenyut
+        # + label "Menyiapkan…" — bukan bar diam di 0% yang dibaca user sebagai freeze.
         progress.emit(ProgressEvent(
-            stage="diarize", fraction=0.0, message="diarization",
+            stage="diarize_prep", fraction=0.0,
+            message="menjalankan segmentasi awal (bisa beberapa menit di file panjang)",
         ))
 
         # Callback progress dipanggil sherpa selama proses. Ia mengembalikan int
-        # (0 = lanjut). Kita pakai untuk menggerakkan indikator.
+        # (0 = lanjut). Panggilan pertama otomatis pindah stage ke "diarize" ->
+        # GUI berpindah ke bar determinate yang benar-benar bergerak.
         def on_progress(num_done, num_total):
             frac = (num_done / num_total) if num_total else 0.0
             progress.emit(ProgressEvent(

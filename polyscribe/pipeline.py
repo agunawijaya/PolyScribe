@@ -161,8 +161,9 @@ def transcribe_file(audio_path: str, config, sink: ProgressSink,
     diarizer = select_diarizer(config)
 
     # --- Tahap load ---
-    sink.emit(ProgressEvent(stage="load", fraction=0.0,
-                            message=f"memuat model ({asr.name} + {diarizer.name})"))
+    # Sub-message per langkah supaya user tak menatap "Memuat model" bisu 60-120 dtk
+    # (bug UX 2026-08). Load stage tetap pulsing di GUI; message = keterangan sub-tahap.
+    sink.emit(ProgressEvent(stage="load", fraction=0.0, message="mendekode audio"))
 
     # Decode ke satu WAV 16k mono yang dipakai bersama ASR & diarization.
     work_dir = Path(tempfile.mkdtemp(prefix="polyscribe_"))
@@ -176,16 +177,22 @@ def transcribe_file(audio_path: str, config, sink: ProgressSink,
     wav_stereo = None
     if getattr(config, "use_spatial_cues", False) or getattr(config, "use_itd_split", False):
         try:
+            sink.emit(ProgressEvent(stage="load", fraction=0.0,
+                                    message="mendekode audio (stereo)"))
             wav_stereo = audio.decode_to_16k_stereo(
                 audio_path, str(work_dir / "audio_16k_stereo.wav"))
         except Exception:
             wav_stereo = None      # gagal decode stereo tak boleh menggagalkan run
 
+    sink.emit(ProgressEvent(stage="load", fraction=0.0,
+                            message=f"memuat ASR ({asr.name})"))
     asr.load()
     # Muat diarizer dengan jaring pengaman RUNTIME: kalau pyannote (Akurat) gagal
     # dimuat karena alasan APA PUN (bukan cuma paket absen — itu sudah dicek di UI),
     # jatuh anggun ke sherpa + pesan ramah, JANGAN matikan app (brief 43). diarizer
     # bisa tertukar ke sherpa di sini; sisa pipeline pakai yang dikembalikan.
+    sink.emit(ProgressEvent(stage="load", fraction=0.0,
+                            message=f"memuat diarization ({diarizer.name})"))
     diarizer = load_diarizer_with_fallback(diarizer, config, sink)
     sink.emit(ProgressEvent(stage="load", fraction=1.0, message="model siap"))
 

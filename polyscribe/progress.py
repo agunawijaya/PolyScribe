@@ -8,7 +8,11 @@ from dataclasses import dataclass
 
 
 # Tahap-tahap resmi. Dipakai konsisten oleh pipeline & sink.
-STAGES = ("load", "transcribe", "diarize", "merge", "done")
+# "diarize_prep" = jendela BISU sebelum backend diarization mulai melapor progres
+# nyata (sherpa: pass segmentasi awal ~140 dtk di file 1 jam; pyannote: seluruh
+# eksekusi pipeline internalnya). UI menampilkannya dengan bar berdenyut supaya
+# tidak terlihat "diam di 0%" — akar keluhan "Memuat model lama sekali" (2026-08).
+STAGES = ("load", "diarize_prep", "transcribe", "diarize", "merge", "done")
 
 
 @dataclass

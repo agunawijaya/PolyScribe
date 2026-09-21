@@ -238,8 +238,12 @@ class PyannoteDiarizer(Diarizer):
         if self._pipeline is None:
             self.load()
 
-        progress.emit(ProgressEvent(stage="diarize", fraction=0.0,
-                                    message=f"diarization (pyannote, {self._device})"))
+        # pyannote tidak meneruskan progres internalnya ke sink kita (ProgressHook
+        # nya mencetak ke stdout, bukan memanggil balik). Jadi seluruh eksekusi
+        # pipeline adalah jendela BISU. Pakai "diarize_prep" -> GUI bar berdenyut &
+        # label "Menyiapkan…" selama pyannote jalan; emit "diarize 100%" saat selesai.
+        progress.emit(ProgressEvent(stage="diarize_prep", fraction=0.0,
+                                    message=f"pyannote di {self._device} — jendela panjang"))
 
         # Muat audio SENDIRI ke tensor in-memory & suapkan sebagai
         # {"waveform", "sample_rate"} — BUKAN path. Alasan: pemuat file bawaan
@@ -273,7 +277,7 @@ class PyannoteDiarizer(Diarizer):
             # setelah load). Pindah pipeline & waveform ke CPU, kosongkan cache,
             # retry SEKALI. Kalau retry masih gagal -> biar error naik ke user.
             progress.emit(ProgressEvent(
-                stage="diarize", fraction=0.0,
+                stage="diarize_prep", fraction=0.0,
                 message=f"VRAM habis ({oom.__class__.__name__}), pindah ke CPU & retry",
                 text_snippet="pyannote: CUDA OOM -> retry di CPU"))
             self._pipeline.to(torch.device("cpu"))
