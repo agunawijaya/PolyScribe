@@ -12,12 +12,16 @@ level Programmer.
 ## 1. Ringkasan eksekutif
 
 **PolyScribe** = aplikasi desktop Windows untuk **transkripsi & diarization**
-rekaman rapat, berjalan **sepenuhnya offline**. Mengubah satu file audio
-menjadi satu file `.txt` bertimestamp dengan label pembicara, tanpa mengirim
-apa pun ke cloud.
+rekaman rapat, **offline-first**. Mengubah satu file audio menjadi satu file
+`.txt` bertimestamp dengan label pembicara. Jalur default 100% di laptop user
+tanpa mengirim apa pun ke cloud; jalur cloud opsional (7 provider) dapat
+dipilih user secara eksplisit per rekaman bila kualitas tertinggi lebih
+penting dari privasi mutlak.
 
-**Nilai utama:** privasi (rapat internal tidak keluar dari laptop) + multi-bahasa
-(EN/AR/ID, boleh campur) + auto (jumlah pembicara dideteksi otomatis).
+**Nilai utama:** privasi-mutlak-sbg-default (rapat internal tidak keluar dari
+laptop kecuali user memilih sadar) + multi-bahasa (EN/AR/ID, boleh campur) +
+auto (jumlah pembicara dideteksi otomatis) + pluggable (satu arsitektur, dua
+tumpukan: offline dan cloud, output identik).
 
 ---
 
@@ -141,14 +145,45 @@ sampah berjam-jam secara diam-diam.
 **FR-9: Pilihan bahasa GUI.** Dropdown bahasa (Inggris / Bahasa Indonesia /
 Auto). Toggle mode Akurat/Cepat. Toggle GPU (opsional matikan Vulkan/CUDA).
 
+**FR-10: Pemilihan backend ASR (2026-09-21).** GUI menyediakan toggle Backend
+= Offline (default) / Cloud, dan bila Cloud dipilih, dropdown pilihan 7
+provider dgn hint harga+kapabilitas+batas ukuran. CLI menyediakan
+`--asr cloud:<provider>`. Backend cloud TAK PERNAH dipilih otomatis; user
+harus eksplisit memilih + memasang API key lebih dulu.
+
+**FR-11: Manajemen API key cloud (2026-09-21).** Tab GUI "Backend & API Keys"
+menyediakan set/ganti/hapus per provider. Key disimpan di Windows Credential
+Manager (via `keyring`); TIDAK PERNAH ditampilkan kembali setelah simpan
+(write-once, hanya masked `●●●●●●xxxx` untuk konfirmasi visual).
+
+**FR-12: Validasi batas ukuran cloud (2026-09-21).** Sebelum pipeline mulai,
+sistem membandingkan durasi+ukuran audio dgn batas provider terpilih. Kalau
+melampaui batas keras (mis. Google Cloud 60 dtk sync), tolak dgn pesan yg
+menyarankan provider alternatif. Kalau melampaui batas lunak (mis. Google Web
+> 15 mnt = risiko rate limit), tampilkan warning yg user konfirmasi.
+
 ### 5.2 Non-functional requirements
 
-**NFR-1: Offline penuh (WAJIB).** Tidak ada panggilan cloud. Tidak ada
-login/token di jalur utama runtime. Model diunduh sekali saat setup; setelah
-itu tidak ada akses jaringan.
+**NFR-1: Offline-first + cloud opt-in (WAJIB dijaga sifat opt-in-nya).**
+- Jalur DEFAULT: tanpa panggilan cloud, tanpa login/token. Model diunduh
+  sekali saat setup; runtime tanpa akses jaringan. User yg tak menyentuh apa
+  pun mendapatkan jalur ini otomatis.
+- Jalur CLOUD: opsional; 7 provider (Google Web / Groq / OpenAI / Deepgram /
+  AssemblyAI / Azure / Google Cloud). WAJIB tak pernah dipilih otomatis —
+  user harus eksplisit pilih backend "Cloud" di GUI atau `--asr cloud:<provider>`
+  di CLI, dan API key harus di-set lebih dulu di keystore. Diarization tetap
+  lokal (cloud hanya menggantikan lapisan ASR).
 
-*Rasionalisasi:* privacy = raison d'être; jaminan ini yang membedakan
-PolyScribe dari solusi cloud.
+*Rasionalisasi:* privacy = raison d'être JALUR DEFAULT; itu yg membedakan
+PolyScribe dari solusi cloud murni. Cloud sbg opsi opt-in menutup kebutuhan
+user yg sesekali butuh kualitas tertinggi untuk audio yg BUKAN sensitif
+(mis. podcast publik, kuliah terbuka), tanpa merusak jaminan default.
+
+*Revisi 2026-09-21:* NFR ini sebelumnya berbunyi "Offline penuh (WAJIB). Tidak
+ada panggilan cloud." Batasan itu dicabut atas keputusan user demi memberi
+opsi kualitas maksimum. Yang TETAP wajib: cloud tak pernah default, API key
+disimpan di Windows Credential Manager (bukan plaintext), diarization tak
+pernah cloud.
 
 **NFR-2: Multi-hardware — wajib JALAN di mana-mana, tidak wajib SERAGAM.**
 Aplikasi wajib jalan di tiga kelas mesin: Windows NVIDIA (CUDA, **acuan
@@ -260,7 +295,14 @@ Hal-hal yang **sengaja tidak dibuat** meskipun mudah:
 - **Input jumlah pembicara manual.** Auto-detect adalah janji produk. Kalau
   auto-detect salah, itu bug diarization yang harus diperbaiki, bukan
   disembunyikan lewat opsi manual.
-- **Cloud fallback** (untuk hardware yang tidak sanggup lokal).
+- **Cloud fallback OTOMATIS.** Backend cloud (2026-09-21) memang tersedia
+  sebagai opsi, tapi user harus MEMILIH-nya secara eksplisit — tak ada
+  "hardware lemah? kami switch ke cloud diam-diam" flow. Jaminan privasi
+  default hanya berlaku kalau user tak pernah dipaksa masuk cloud.
+- **Cloud diarization.** Beberapa provider cloud (Deepgram/AssemblyAI/Azure/GC)
+  menawarkan speaker labels; kami mengabaikannya & tetap pakai pyannote/sherpa
+  lokal. Alasan: konsistensi output antar-provider + merge.py cuma paham satu
+  format label.
 - **Telemetri / analytics** (mencatat pemakaian, statistik).
 
 ---
@@ -302,8 +344,10 @@ Hal-hal yang **sengaja tidak dibuat** meskipun mudah:
 
 ## 8. Metrik & telemetri
 
-**Tidak ada telemetri otomatis.** Sesuai NFR-1 (offline penuh) dan
-anti-feature (§6.3), aplikasi tidak mengirim / mencatat statistik pemakaian.
+**Tidak ada telemetri otomatis.** Sesuai NFR-1 (offline-first) dan
+anti-feature (§6.3), aplikasi tidak mengirim / mencatat statistik pemakaian
+di jalur default MAUPUN cloud. Request cloud yang user pilih hanya berisi
+audio + parameter transkripsi ke provider terpilih — tak ada analitik selipan.
 
 Metrik kualitas dikumpulkan **manual** oleh PM/Tester melalui:
 - Waktu proses vs durasi audio (dari log CLI/GUI).

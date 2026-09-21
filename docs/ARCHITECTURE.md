@@ -22,8 +22,12 @@ antar-agen lihat [CLAUDE.md](../CLAUDE.md).
 - **Dua titik pluggable**: `AsrBackend` untuk transkripsi, `Diarizer` untuk
   pelabelan pembicara. Interface tunggal, implementasi bisa ditukar tanpa
   membongkar pipeline.
-- **Offline penuh** di jalur utama. Model diunduh sekali saat setup; runtime
-  tidak menyentuh jaringan.
+- **Offline-first, cloud opt-in.** Jalur DEFAULT (`asr_backend="auto"`) tak
+  menyentuh jaringan — model diunduh sekali saat setup, runtime lokal.
+  Sejak 2026-09-21, `asr_backend="cloud"` opsional membuka 7 backend cloud
+  (Google Web / Groq / OpenAI / Deepgram / AssemblyAI / Azure / Google Cloud);
+  dipilih user secara eksplisit per rekaman, TAK PERNAH otomatis. Diarization
+  tetap lokal untuk semua jalur.
 - **Prioritas hardware**: CUDA (NVIDIA) → Vulkan (iGPU AMD Radeon) → CPU int8
   (universal fallback yang tak pernah gagal karena hardware).
 - **Profil NVIDIA = acuan kualitas.** Beberapa cacat yang dikejar lama di jalur
@@ -401,7 +405,7 @@ stateDiagram-v2
 - Diunduh sekali via `scripts/download_models.py`; sumber: HuggingFace &
   GitHub releases resmi.
 - Runtime pakai `local_files_only=True` untuk faster-whisper, `HF_HUB_OFFLINE=1`
-  untuk pyannote — **tidak menyentuh jaringan**.
+  untuk pyannote — **tidak menyentuh jaringan** di jalur default.
 - Model pyannote ter-gate di HF: butuh token + lisensi diterima **sekali saat
   setup**; runtime tetap offline tanpa token.
 
@@ -411,11 +415,55 @@ flowchart LR
         DL[scripts/download_models.py] --> HF[HuggingFace / GitHub]
         HF --> M[(models/)]
     end
-    subgraph Runtime [Runtime — offline penuh]
+    subgraph Runtime [Runtime default — offline penuh]
         App[Aplikasi] -->|local_files_only| M
         App -->|HF_HUB_OFFLINE| M
     end
 ```
+
+---
+
+## 9b. Cloud backends (opt-in, 2026-09-21)
+
+Modul `polyscribe/asr/cloud/` menyediakan 7 adapter ASR cloud sbg backend
+alternatif. Semua mengikuti kontrak `AsrBackend` yg sama dgn backend lokal,
+jadi `pipeline.py` tak sadar apakah backend cloud atau lokal.
+
+**Provider terdaftar** (metadata di `registry.py`):
+- `google_web` (gratis, endpoint demo tak resmi — sama dgn markitdown Microsoft)
+- `groq` (Whisper large-v3, ~$0.04/jam, auto-chunk 5 mnt)
+- `openai_whisper` (~$0.36/jam, auto-chunk 5 mnt)
+- `deepgram` (Nova-3, ~$0.26/jam, native word-level + diarization)
+- `assemblyai` (~$0.37/jam, upload+poll)
+- `azure_speech` (~$1.00/jam, butuh region)
+- `google_cloud` (chirp_2, ~$0.96/jam, batas KERAS 60 dtk sync — file panjang butuh GCS setup yg belum diimplementasi)
+
+**Alur data**:
+```mermaid
+flowchart LR
+    A[Audio user] --> B[Decode 16k mono lokal]
+    B --> C[Diarization lokal<br/>pyannote/sherpa]
+    B --> D[Cloud adapter<br/>HTTP ke provider]
+    C --> E[Merge overlap<br/>lokal]
+    D --> E
+    E --> F[Tulis .txt inkremental<br/>di sebelah audio]
+```
+
+Yang cloud: **hanya lapisan ASR (transkripsi teks)**. Diarization TETAP lokal
+untuk semua jalur cloud — provider yg beri speaker labels (Deepgram, AssemblyAI,
+Azure, Google Cloud) hasilnya diabaikan supaya output konsisten antar-provider
+dan merge.py cuma menerima satu format label.
+
+**Kredensial**: `polyscribe/keystore.py` (Windows Credential Manager via `keyring`).
+Write-once di GUI — setelah simpan, key TIDAK PERNAH ditampilkan kembali.
+
+**Validasi ukuran**: `polyscribe/asr/cloud/validation.py` cek durasi + size
+audio terhadap batas provider SEBELUM pipeline mulai. Gagal cepat = user tak
+menunggu 30 dtk "Memuat model" untuk error yg bisa dideteksi instan.
+
+**Dependency**: `requirements-cloud.txt` (opsional) — `keyring`, `requests`,
+`SpeechRecognition` (untuk Google Web), `pydub`. **Sengaja HTTP langsung**,
+bukan SDK vendor (install ringan, tak terikat versi SDK).
 
 ---
 
@@ -450,17 +498,24 @@ Kontrak antrean: `("progress", ProgressEvent)` selama jalan, lalu tepat satu
 ```
 PolyScribe/
 ├── polyscribe/               kode aplikasi (lihat §3)
+│   ├── asr/                  backend ASR
+│   │   ├── faster_whisper_backend.py   (offline: CUDA / CPU int8)
+│   │   ├── whispercpp_backend.py       (offline: Vulkan iGPU AMD)
+│   │   └── cloud/                      (opsional: 7 provider)
+│   ├── diarization/          backend diarization (pluggable)
+│   └── keystore.py           API key vault (Windows Credential Manager)
 ├── models/                   model AI (offline, no-commit)
 ├── vendor/                   binary Vulkan whisper-cli (no-commit)
 ├── scripts/                  download_models, benchmark, tools
-├── tests/                    unit test (test_*.py, 75 test)
+├── tests/                    unit test (test_*.py, ~120 test)
 ├── docs/                     dokumentasi (file ini + PRODUCT_SPEC dst)
 ├── prompts/                  komunikasi antar-agen (gitignored)
 │   ├── results/              output/laporan dari agen
 │   └── scripts/              skrip diagnostik per-brief
 ├── requirements.txt          jalur inti (semua mesin)
 ├── requirements-cuda.txt     ekstra untuk mesin NVIDIA
-├── requirements-pyannote.txt ekstra untuk mode Akurat
+├── requirements-pyannote.txt ekstra untuk mode Akurat (pyannote)
+├── requirements-cloud.txt    ekstra untuk backend cloud opsional
 ├── PolyScribe.bat            launcher klik-dua-kali (pakai %~dp0)
 ├── profile.json              {"profile": "amd" | "nvidia"}
 ├── README.md                 dokumen user-facing
@@ -475,16 +530,30 @@ PolyScribe/
 
 Sengaja **tidak** dilakukan (dan alasan singkat):
 
-- **Server / API mode.** PolyScribe adalah aplikasi desktop offline; jaringan
-  bukan bagian dari jalur data. Kalau butuh, itu produk berbeda.
-- **Cloud storage / sync.** Sama alasannya: privasi rekaman rapat adalah
-  raison d'être aplikasi ini.
+- **Server / API mode.** PolyScribe adalah aplikasi desktop; menerima request
+  transkripsi dari klien lain di jaringan bukan bagian dari jalur data. Kalau
+  butuh, itu produk berbeda.
+- **Cloud storage / sync untuk output.** Privasi rekaman rapat = raison
+  d'être jalur default. Bila user ingin sinkronkan `.txt`, itu keputusan
+  di luar aplikasi (mis. OneDrive folder). (Backend ASR cloud yg ditambahkan
+  2026-09-21 mengirim AUDIO ke provider untuk transkripsi — beda dari cloud
+  storage/sync yg dimaksud di sini.)
+- **Cloud diarization.** Provider cloud yg beri speaker labels native
+  diabaikan; pipeline tetap pakai pyannote/sherpa lokal. Alasan: konsistensi
+  output antar-provider + merge.py cuma paham satu format label.
+- **Cloud sebagai default / fallback otomatis.** Backend cloud memang
+  tersedia sbg opsi (2026-09-21) tapi user harus memilih eksplisit. Tak ada
+  "hardware lemah? switch ke cloud diam-diam" flow.
 - **Multi-tenant / user accounts.** Aplikasi single-user di laptop pribadi.
 - **Streaming realtime (live transcription).** Pipeline dirancang untuk file
   audio yang sudah ada, bukan stream mic. Whisper large-v3 juga tidak dioptimasi
   untuk latency rendah.
 - **Fork per hardware.** Ditolak eksplisit di CLAUDE.md. Satu basis kode +
   runtime detect + build profile.
+- **Google Cloud LongRunningRecognize (BatchRecognize + GCS bucket).**
+  Sengaja tak diimplementasi meski file > 60 dtk butuh mode ini. Alasan:
+  Deepgram $0.26/jam menang atas GC $0.96/jam di semua aspek + tak butuh
+  setup GCS. Untuk user pribadi tanpa kontrak GCP, tak ada return-nya.
 
 ---
 
